@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hire & Booking Request | Claygate Village Hall</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+  <header>
+    <div class="nav-container">
+      <a href="/index.html" class="brand">
+        <div class="brand-icon">CVH</div>
+        <div>
+          <div class="brand-title">Claygate Village Hall</div>
+          <div class="brand-sub">Hire & Bookings Portal</div>
+        </div>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/index.html">Home</a></li>
+          <li><a href="/index.html#facilities">Facilities</a></li>
+          <li><a href="/booking.html" class="active">Book a Room</a></li>
+          <li><a href="/admin.html" class="btn btn-outline btn-sm">Admin Login</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main class="section">
+    <div class="section-header">
+      <h2>Hall Booking Inquiry</h2>
+      <p>Submit your hire request below. The lettings team will review your application, verify availability, and issue confirmation.</p>
+    </div>
+
+    <div class="form-container">
+      <div id="alertBox" class="alert" style="display:none;"></div>
+
+      <form id="bookingForm">
+        <div class="form-grid">
+          
+          <!-- Contact Details -->
+          <div class="form-group form-full">
+            <h3 style="margin-bottom:0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; color: var(--primary);">1. Hirer Information</h3>
+          </div>
+
+          <div class="form-group">
+            <label for="full_name">Full Name *</label>
+            <input type="text" id="full_name" name="full_name" class="form-control" placeholder="e.g. Roman Shapiro" required>
+          </div>
+
+          <div class="form-group">
+            <label for="organization">Organization / Club (Optional)</label>
+            <input type="text" id="organization" name="organization" class="form-control" placeholder="e.g. Claygate Dramatic Society">
+          </div>
+
+          <div class="form-group">
+            <label for="email">Email Address *</label>
+            <input type="email" id="email" name="email" class="form-control" placeholder="you@example.com" required>
+          </div>
+
+          <div class="form-group">
+            <label for="phone">Contact Telephone *</label>
+            <input type="tel" id="phone" name="phone" class="form-control" placeholder="07123 456789" required>
+          </div>
+
+          <div class="form-group form-full">
+            <label for="address">Address (Billing / Contact)</label>
+            <input type="text" id="address" name="address" class="form-control" placeholder="e.g. 4 Gordon Road, Claygate, Esher, KT10 0PQ">
+          </div>
+
+          <!-- Event Details -->
+          <div class="form-group form-full" style="margin-top: 1rem;">
+            <h3 style="margin-bottom:0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; color: var(--primary);">2. Reservation & Venue Details</h3>
+          </div>
+
+          <div class="form-group">
+            <label for="room">Room Required *</label>
+            <select id="room" name="room" class="form-control" required>
+              <option value="">-- Select a space --</option>
+              <option value="main_hall">Main Hall (with stage access)</option>
+              <option value="small_hall">Small Hall</option>
+              <option value="committee_room">Committee Room</option>
+              <option value="entire_venue">Entire Complex</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="event_type">Event / Hire Type *</label>
+            <select id="event_type" name="event_type" class="form-control" required>
+              <option value="">-- Select Event Category --</option>
+              <option value="private_party">Children / Family Party (up to age 11)</option>
+              <option value="wedding_reception">Wedding Reception / Celebration</option>
+              <option value="fitness_class">Class / Fitness / Dance Group</option>
+              <option value="theatrical_performance">Stage / Drama / Musical Performance</option>
+              <option value="meeting_conference">Meeting / Corporate Lecture</option>
+              <option value="other">Other Community Gathering</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="event_date">Date Required *</label>
+            <input type="date" id="event_date" name="event_date" class="form-control" required>
+          </div>
+
+          <div class="form-group">
+            <label for="guest_count">Estimated Number of Attendees *</label>
+            <input type="number" id="guest_count" name="guest_count" class="form-control" min="1" max="250" placeholder="e.g. 60" required>
+          </div>
+
+          <div class="form-group">
+            <label for="start_time">Start Time (Including Setup) *</label>
+            <input type="time" id="start_time" name="start_time" class="form-control" required>
+          </div>
+
+          <div class="form-group">
+            <label for="end_time">End Time (Including Clearing Up) *</label>
+            <input type="time" id="end_time" name="end_time" class="form-control" required>
+          </div>
+
+          <!-- Add-ons -->
+          <div class="form-group form-full">
+            <label>Additional Facilities Required</label>
+            <div class="checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="requires_stage" name="requires_stage">
+                <span>Stage & PA / Lighting System</span>
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="requires_kitchen" name="requires_kitchen">
+                <span>Commercial Kitchen & Catering Facilities</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="form-group form-full">
+            <label for="special_requirements">Special Requirements / Notes</label>
+            <textarea id="special_requirements" name="special_requirements" class="form-control" rows="3" placeholder="Please mention any equipment requirements, alcohol provision, or specific timings..."></textarea>
+          </div>
+
+          <div class="form-group form-full" style="margin-top: 1rem;">
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+              ℹ️ By submitting this booking request, you agree to comply with the standard Claygate Village Hall Conditions of Hire and Fire Safety regulations.
+            </p>
+            <button type="submit" id="submitBtn" class="btn btn-primary" style="width: 100%; font-size: 1.1rem; padding: 0.85rem;">
+              Submit Booking Request
+            </button>
+          </div>
+
+        </div>
+      </form>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-bottom">
+      <p>&copy; 2026 Claygate Village Hall Management Committee. Powered by Cloudflare.</p>
+    </div>
+  </footer>
+
+  <script src="/js/booking.js"></script>
+</body>
+</html>

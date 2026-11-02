@@ -1,0 +1,11 @@
+{
+  "name": "claygate-village-hall",
+  "version": "1.0.0",
+  "description": "Claygate Village Hall community website & booking management system for Cloudflare Pages",
+  "scripts": {
+    "dev": "python -m http.server 8080 --directory public"
+  },
+  "keywords": ["claygate", "village-hall", "cloudflare-pages", "d1"],
+  "author": "Roman Shapiro",
+  "license": "ISC"
+}

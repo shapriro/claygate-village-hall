@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard | Claygate Village Hall</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+  <header>
+    <div class="nav-container">
+      <a href="/index.html" class="brand">
+        <div class="brand-icon">CVH</div>
+        <div>
+          <div class="brand-title">Claygate Village Hall</div>
+          <div class="brand-sub">Administrator Portal</div>
+        </div>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/index.html">View Website</a></li>
+          <li><a href="/booking.html">Booking Form</a></li>
+          <li><button id="logoutBtn" class="btn btn-outline btn-sm" style="display:none;">Sign Out</button></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main class="section" style="max-width: 1400px;">
+    
+    <!-- Login Card -->
+    <div id="loginCard" class="form-container" style="max-width: 450px;">
+      <h3 style="margin-bottom: 1rem; color: var(--primary);">Administrator Access</h3>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Enter your Cloudflare admin authorization token to view and manage venue bookings.</p>
+      
+      <div id="loginAlert" class="alert alert-error" style="display:none;"></div>
+      
+      <form id="adminLoginForm">
+        <div class="form-group">
+          <label for="adminSecret">Admin Secret Key</label>
+          <input type="password" id="adminSecret" class="form-control" placeholder="Default: admin123" required>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;">Sign In</button>
+      </form>
+    </div>
+
+    <!-- Dashboard View -->
+    <div id="dashboardSection" style="display:none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <h2>Booking Requests</h2>
+          <p style="color: var(--text-muted); font-size: 0.9rem;">Review and manage inquiries for Claygate Village Hall</p>
+        </div>
+        <div style="display: flex; gap: 0.75rem; align-items: center;">
+          <select id="filterStatus" class="form-control" style="width: auto;">
+            <option value="">All Statuses</option>
+            <option value="pending">Pending</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="declined">Declined</option>
+          </select>
+          <button id="refreshBtn" class="btn btn-outline btn-sm">↻ Refresh</button>
+        </div>
+      </div>
+
+      <div id="statusNotice" class="alert" style="display:none;"></div>
+
+      <div class="table-wrapper">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Ref #</th>
+              <th>Date & Time</th>
+              <th>Hirer Details</th>
+              <th>Room & Event</th>
+              <th>Add-ons</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="bookingsTableBody">
+            <tr>
+              <td colspan="7" style="text-align:center; padding: 2rem;">Loading bookings...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>
