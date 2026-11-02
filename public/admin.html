@@ -74,16 +74,48 @@
               <th>Hirer Details</th>
               <th>Room & Event</th>
               <th>Add-ons</th>
+              <th>Est. Cost</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody id="bookingsTableBody">
             <tr>
-              <td colspan="7" style="text-align:center; padding: 2rem;">Loading bookings...</td>
+              <td colspan="8" style="text-align:center; padding: 2rem;">Loading bookings...</td>
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Pricing Management Card -->
+      <div style="margin-top: 3.5rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+          <div>
+            <h3>Venue Pricing Configuration</h3>
+            <p style="color:var(--text-muted); font-size:0.9rem;">Adjust hourly rates and add-on hire costs for all public booking calculations.</p>
+          </div>
+          <button id="savePricesBtn" class="btn btn-primary btn-sm">💾 Save Price Changes</button>
+        </div>
+
+        <div id="pricingNotice" class="alert" style="display:none;"></div>
+
+        <div class="table-wrapper">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Item / Facility</th>
+                <th>Category</th>
+                <th>Unit Type</th>
+                <th>Rate (£ GBP)</th>
+              </tr>
+            </thead>
+            <tbody id="pricingTableBody">
+              <tr>
+                <td colspan="4" style="text-align:center; padding: 2rem;">Loading pricing settings...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 

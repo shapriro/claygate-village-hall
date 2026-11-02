@@ -1,4 +1,4 @@
-// Admin Dashboard Logic
+// Admin Dashboard Logic: Bookings & Pricing Administration
 let token = sessionStorage.getItem("cvh_admin_token") || "";
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const logoutBtn = document.getElementById("logoutBtn");
   const refreshBtn = document.getElementById("refreshBtn");
   const filterStatus = document.getElementById("filterStatus");
+  const savePricesBtn = document.getElementById("savePricesBtn");
 
   if (token) {
     showDashboard();
@@ -31,8 +32,9 @@ document.addEventListener("DOMContentLoaded", () => {
     logoutBtn.style.display = "none";
   });
 
-  refreshBtn.addEventListener("click", () => loadBookings());
+  refreshBtn.addEventListener("click", () => { loadBookings(); loadPricing(); });
   filterStatus.addEventListener("change", () => loadBookings());
+  savePricesBtn.addEventListener("click", () => savePricing());
 });
 
 async function showDashboard() {
@@ -40,6 +42,7 @@ async function showDashboard() {
   document.getElementById("dashboardSection").style.display = "block";
   document.getElementById("logoutBtn").style.display = "inline-block";
   await loadBookings();
+  await loadPricing();
 }
 
 async function loadBookings() {
@@ -47,14 +50,12 @@ async function loadBookings() {
   const notice = document.getElementById("statusNotice");
   const filter = document.getElementById("filterStatus").value;
 
-  tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding: 2rem;">Loading bookings...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 2rem;">Loading bookings...</td></tr>`;
 
   try {
     const url = `/api/bookings${filter ? `?status=${filter}` : ""}`;
     const res = await fetch(url, {
-      headers: {
-        "Authorization": `Bearer ${token}`
-      }
+      headers: { "Authorization": `Bearer ${token}` }
     });
 
     const data = await res.json();
@@ -66,17 +67,12 @@ async function loadBookings() {
         location.reload();
         return;
       }
-      if (res.status === 503) {
-        notice.className = "alert alert-error";
-        notice.textContent = "Notice: Cloudflare D1 database binding 'DB' is not configured yet. Showing demo data or empty.";
-        notice.style.display = "block";
-      }
       throw new Error(data.error || "Failed to load bookings");
     }
 
     const bookings = data.bookings || [];
     if (bookings.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding: 2rem; color: var(--text-muted);">No booking requests found.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 2rem; color: var(--text-muted);">No booking requests found.</td></tr>`;
       return;
     }
 
@@ -102,6 +98,9 @@ async function loadBookings() {
           ${!b.requires_stage && !b.requires_kitchen ? '<small style="color:var(--text-muted);">None</small>' : ''}
         </td>
         <td>
+          <strong style="color:#166534;">£${(parseFloat(b.estimated_cost) || 0.0).toFixed(2)}</strong>
+        </td>
+        <td>
           <span class="status-tag status-${b.status.toLowerCase()}">${escapeHtml(b.status)}</span>
         </td>
         <td>
@@ -114,7 +113,73 @@ async function loadBookings() {
     `).join("");
 
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding: 2rem; color: var(--danger);">${err.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 2rem; color: var(--danger);">${err.message}</td></tr>`;
+  }
+}
+
+async function loadPricing() {
+  const tbody = document.getElementById("pricingTableBody");
+  tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding: 1.5rem;">Loading pricing settings...</td></tr>`;
+
+  try {
+    const res = await fetch("/api/pricing");
+    const data = await res.json();
+    const list = data.pricing || [];
+
+    tbody.innerHTML = list.map(item => `
+      <tr>
+        <td><strong>${escapeHtml(item.name)}</strong></td>
+        <td><span class="badge badge-blue">${escapeHtml(item.category)}</span></td>
+        <td>${escapeHtml(item.unit.replace("_", " "))}</td>
+        <td>
+          £ <input type="number" step="0.50" min="0" class="price-input" data-key="${item.key}" value="${parseFloat(item.price).toFixed(2)}">
+        </td>
+      </tr>
+    `).join("");
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--danger); padding:1rem;">Failed to load pricing: ${err.message}</td></tr>`;
+  }
+}
+
+async function savePricing() {
+  const notice = document.getElementById("pricingNotice");
+  const saveBtn = document.getElementById("savePricesBtn");
+  const inputs = document.querySelectorAll(".price-input");
+
+  const prices = Array.from(inputs).map(inp => ({
+    key: inp.getAttribute("data-key"),
+    price: parseFloat(inp.value) || 0.0
+  }));
+
+  saveBtn.disabled = true;
+  saveBtn.textContent = "Saving...";
+
+  try {
+    const res = await fetch("/api/pricing", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ prices })
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      notice.className = "alert alert-success";
+      notice.textContent = "Pricing configuration successfully updated! New rates are now active.";
+      notice.style.display = "block";
+      setTimeout(() => { notice.style.display = "none"; }, 4000);
+    } else {
+      throw new Error(data.error || "Failed to update pricing");
+    }
+  } catch (err) {
+    notice.className = "alert alert-error";
+    notice.textContent = "Error saving prices: " + err.message;
+    notice.style.display = "block";
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "💾 Save Price Changes";
   }
 }
 

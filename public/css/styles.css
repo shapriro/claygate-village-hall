@@ -438,6 +438,52 @@ nav a:hover, nav a.active {
   border-radius: 3px;
 }
 
+/* Cost Estimation Summary Card */
+.cost-card {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.cost-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid #dcfce7;
+  padding-bottom: 0.5rem;
+}
+
+.cost-breakdown {
+  list-style: none;
+  font-size: 0.9rem;
+  color: #166534;
+}
+
+.cost-breakdown li {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.35rem;
+}
+
+.cost-total {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #14532d;
+}
+
+/* Pricing admin table */
+.price-input {
+  width: 90px;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-weight: 600;
+  text-align: right;
+}
+
 /* Footer */
 footer {
   background: #0f172a;

@@ -154,6 +154,20 @@
             <textarea id="special_requirements" name="special_requirements" class="form-control" rows="3" placeholder="Please mention any equipment requirements, alcohol provision, or specific timings..."></textarea>
           </div>
 
+          <!-- Live Cost Estimator -->
+          <div class="form-group form-full" id="costSummaryContainer" style="display: none;">
+            <div class="cost-card">
+              <div class="cost-card-header">
+                <span style="font-weight: 700; color: #166534; font-size: 1.05rem;">Estimated Hire Cost</span>
+                <span id="displayTotalCost" class="cost-total">£0.00</span>
+              </div>
+              <ul class="cost-breakdown" id="costBreakdownList"></ul>
+              <small style="display:block; margin-top:0.75rem; color:#15803d; font-size:0.75rem;">
+                * Rate estimate excludes the £50 refundable damage deposit, which is invoiced separately for first-time private hires.
+              </small>
+            </div>
+          </div>
+
           <div class="form-group form-full" style="margin-top: 1rem;">
             <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
               ℹ️ By submitting this booking request, you agree to comply with the standard Claygate Village Hall Conditions of Hire and Fire Safety regulations.

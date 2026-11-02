@@ -1,7 +1,7 @@
 """
 Claygate Village Hall - Local Development Server
 Emulates Cloudflare Pages & Cloudflare D1 locally using Python SQLite.
-Includes recurring schedule awareness (Montessori, Impact Dance, Dramatic Society, etc.)
+Includes recurring schedule awareness & Admin Pricing Configuration.
 """
 
 import http.server
@@ -40,6 +40,7 @@ def init_db():
         requires_stage INTEGER DEFAULT 0,
         requires_kitchen INTEGER DEFAULT 0,
         special_requirements TEXT,
+        estimated_cost REAL DEFAULT 0.0,
         status TEXT DEFAULT 'pending',
         admin_notes TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -60,38 +61,49 @@ def init_db():
     );
     """)
 
+    # 3. Pricing Settings
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS pricing_settings (
+        key TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        price REAL NOT NULL,
+        unit TEXT NOT NULL
+    );
+    """)
+
+    cur.execute("SELECT COUNT(*) FROM pricing_settings")
+    if cur.fetchone()[0] == 0:
+        default_prices = [
+            ('rate_main_hall', 'Main Hall', 'room_rate', 16.00, 'per_hour'),
+            ('rate_small_hall', 'Small Hall', 'room_rate', 11.00, 'per_hour'),
+            ('rate_committee_room', 'Committee Room', 'room_rate', 8.00, 'per_hour'),
+            ('rate_entire_venue', 'Entire Complex', 'room_rate', 25.00, 'per_hour'),
+            ('rate_stage_av', 'Stage Lighting & PA System', 'addon', 25.00, 'per_event'),
+            ('rate_kitchen_commercial', 'Commercial Kitchen & Cooker/Dishwasher', 'addon', 10.00, 'per_event'),
+            ('rate_deposit', 'Refundable Security Deposit', 'deposit', 50.00, 'flat')
+        ]
+        cur.executemany("INSERT OR REPLACE INTO pricing_settings VALUES (?, ?, ?, ?, ?)", default_prices)
+
     # Seed regular schedules if empty
     cur.execute("SELECT COUNT(*) FROM regular_schedules")
     if cur.fetchone()[0] == 0:
         schedules = [
-            # Weekdays: Claygate Montessori Nursery in Small Hall (Mon-Fri 08:30 - 13:00)
             ('Claygate Montessori Nursery', 'Claygate Montessori School', 1, 'small_hall', '08:30', '13:00'),
             ('Claygate Montessori Nursery', 'Claygate Montessori School', 2, 'small_hall', '08:30', '13:00'),
             ('Claygate Montessori Nursery', 'Claygate Montessori School', 3, 'small_hall', '08:30', '13:00'),
             ('Claygate Montessori Nursery', 'Claygate Montessori School', 4, 'small_hall', '08:30', '13:00'),
             ('Claygate Montessori Nursery', 'Claygate Montessori School', 5, 'small_hall', '08:30', '13:00'),
-
-            # Monday
             ('Little Kickers (Ages 1.5 - 5)', 'Little Kickers', 1, 'main_hall', '09:00', '12:00'),
             ('Claygate Dramatic Society Rehearsal', 'Claygate Dramatic Society', 1, 'main_hall', '19:30', '22:30'),
-
-            # Tuesday (e.g. Nov 3!)
             ('Impact Dance Studios (Youth Dance)', 'Impact Dance Studios', 2, 'main_hall', '15:30', '18:30'),
             ('Claygate Community Pilates', 'Surrey Fitness & Pilates', 2, 'main_hall', '19:00', '21:00'),
-
-            # Wednesday
             ('Monkey Music (Toddlers & Babies)', 'Monkey Music Elmbridge', 3, 'small_hall', '09:30', '12:30'),
             ('Impact Dance Studios', 'Impact Dance Studios', 3, 'main_hall', '16:00', '18:30'),
-
-            # Thursday
             ('Fairy Footsteps Pre-School Ballet', 'Fairy Footsteps', 4, 'small_hall', '09:30', '12:00'),
             ('Impact Dance Studios', 'Impact Dance Studios', 4, 'main_hall', '16:00', '18:30'),
             ('Claygate Dramatic Society Rehearsal', 'Claygate Dramatic Society', 4, 'main_hall', '19:30', '22:30'),
-
-            # Friday
             ('Surrey Singing School', 'Surrey Singing & Drama', 5, 'main_hall', '16:00', '19:00'),
-
-            # Saturday
             ('Impact Dance Studios Saturday Class', 'Impact Dance Studios', 6, 'main_hall', '09:00', '13:00')
         ]
         cur.executemany("""
@@ -108,14 +120,18 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path.startswith("/api/bookings"):
+        if parsed.path == "/api/pricing":
+            self.handle_pricing_get()
+        elif parsed.path.startswith("/api/bookings"):
             self.handle_api_get(parsed)
         else:
             super().do_GET()
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path == "/api/bookings":
+        if parsed.path == "/api/pricing":
+            self.handle_pricing_post()
+        elif parsed.path == "/api/bookings":
             self.handle_api_post()
         else:
             self.send_error(404, "Endpoint not found")
@@ -126,6 +142,32 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_api_patch()
         else:
             self.send_error(404, "Endpoint not found")
+
+    def handle_pricing_get(self):
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM pricing_settings ORDER BY category, key")
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return self.send_json({"pricing": rows})
+
+    def handle_pricing_post(self):
+        auth = self.headers.get("Authorization", "")
+        if auth != "Bearer admin123":
+            return self.send_json({"error": "Unauthorized"}, 401)
+
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length).decode("utf-8")
+        data = json.loads(body)
+
+        conn = sqlite3.connect(DB_FILE)
+        cur = conn.cursor()
+        for p in data.get("prices", []):
+            cur.execute("UPDATE pricing_settings SET price = ? WHERE key = ?", (float(p.get("price", 0)), p.get("key")))
+        conn.commit()
+        conn.close()
+        return self.send_json({"success": True})
 
     def handle_api_get(self, parsed):
         params = parse_qs(parsed.query)
@@ -164,11 +206,10 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
             for row in cur.fetchall():
                 busy_slots.append(dict(row))
 
-            # 1b. Recurring regular timetable (Day of week: Monday=1 ... Sunday=7, SQLite/Python iso format)
+            # 1b. Recurring regular timetable
             try:
                 dt = datetime.strptime(date_str, "%Y-%m-%d")
-                day_of_week = dt.isoweekday() # 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun
-                # In schema, 0=Sun, 1=Mon..6=Sat:
+                day_of_week = dt.isoweekday()
                 schema_dow = 0 if day_of_week == 7 else day_of_week
 
                 if room and room != "entire_venue":
@@ -215,7 +256,6 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
         body = self.rfile.read(length).decode("utf-8")
         data = json.loads(body)
 
-        # Check required fields
         required = ["full_name", "email", "phone", "room", "event_type", "event_date", "start_time", "end_time"]
         for f in required:
             if not data.get(f):
@@ -228,7 +268,7 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # Check overlap with existing one-off bookings
+        # Check overlap
         if data["room"] == "entire_venue":
             cur.execute("""
                 SELECT id, room, start_time, end_time 
@@ -253,7 +293,6 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
 
         conflict = cur.fetchone()
 
-        # Also check overlap with regular weekly timetable
         if not conflict:
             try:
                 dt = datetime.strptime(data["event_date"], "%Y-%m-%d")
@@ -294,8 +333,8 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
             INSERT INTO bookings (
                 reference_code, full_name, organization, email, phone, address,
                 room, event_type, event_date, start_time, end_time, guest_count,
-                requires_stage, requires_kitchen, special_requirements, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                requires_stage, requires_kitchen, special_requirements, estimated_cost, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         """, (
             ref_code,
             data["full_name"],
@@ -311,7 +350,8 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
             int(data.get("guest_count", 0)),
             1 if data.get("requires_stage") else 0,
             1 if data.get("requires_kitchen") else 0,
-            data.get("special_requirements")
+            data.get("special_requirements"),
+            float(data.get("estimated_cost", 0.0))
         ))
         conn.commit()
         conn.close()
