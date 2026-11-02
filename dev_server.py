@@ -1,6 +1,7 @@
 """
 Claygate Village Hall - Local Development Server
 Emulates Cloudflare Pages & Cloudflare D1 locally using Python SQLite.
+Includes recurring schedule awareness (Montessori, Impact Dance, Dramatic Society, etc.)
 """
 
 import http.server
@@ -10,6 +11,7 @@ import sqlite3
 import os
 import random
 import string
+from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 
 PORT = 8080
@@ -18,6 +20,8 @@ DB_FILE = "local_dev.sqlite3"
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
+    
+    # 1. Bookings table
     cur.execute("""
     CREATE TABLE IF NOT EXISTS bookings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,6 +46,59 @@ def init_db():
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     """)
+
+    # 2. Regular recurring timetable
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS regular_schedules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        activity_name TEXT NOT NULL,
+        organization TEXT,
+        day_of_week INTEGER NOT NULL,
+        room TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL
+    );
+    """)
+
+    # Seed regular schedules if empty
+    cur.execute("SELECT COUNT(*) FROM regular_schedules")
+    if cur.fetchone()[0] == 0:
+        schedules = [
+            # Weekdays: Claygate Montessori Nursery in Small Hall (Mon-Fri 08:30 - 13:00)
+            ('Claygate Montessori Nursery', 'Claygate Montessori School', 1, 'small_hall', '08:30', '13:00'),
+            ('Claygate Montessori Nursery', 'Claygate Montessori School', 2, 'small_hall', '08:30', '13:00'),
+            ('Claygate Montessori Nursery', 'Claygate Montessori School', 3, 'small_hall', '08:30', '13:00'),
+            ('Claygate Montessori Nursery', 'Claygate Montessori School', 4, 'small_hall', '08:30', '13:00'),
+            ('Claygate Montessori Nursery', 'Claygate Montessori School', 5, 'small_hall', '08:30', '13:00'),
+
+            # Monday
+            ('Little Kickers (Ages 1.5 - 5)', 'Little Kickers', 1, 'main_hall', '09:00', '12:00'),
+            ('Claygate Dramatic Society Rehearsal', 'Claygate Dramatic Society', 1, 'main_hall', '19:30', '22:30'),
+
+            # Tuesday (e.g. Nov 3!)
+            ('Impact Dance Studios (Youth Dance)', 'Impact Dance Studios', 2, 'main_hall', '15:30', '18:30'),
+            ('Claygate Community Pilates', 'Surrey Fitness & Pilates', 2, 'main_hall', '19:00', '21:00'),
+
+            # Wednesday
+            ('Monkey Music (Toddlers & Babies)', 'Monkey Music Elmbridge', 3, 'small_hall', '09:30', '12:30'),
+            ('Impact Dance Studios', 'Impact Dance Studios', 3, 'main_hall', '16:00', '18:30'),
+
+            # Thursday
+            ('Fairy Footsteps Pre-School Ballet', 'Fairy Footsteps', 4, 'small_hall', '09:30', '12:00'),
+            ('Impact Dance Studios', 'Impact Dance Studios', 4, 'main_hall', '16:00', '18:30'),
+            ('Claygate Dramatic Society Rehearsal', 'Claygate Dramatic Society', 4, 'main_hall', '19:30', '22:30'),
+
+            # Friday
+            ('Surrey Singing School', 'Surrey Singing & Drama', 5, 'main_hall', '16:00', '19:00'),
+
+            # Saturday
+            ('Impact Dance Studios Saturday Class', 'Impact Dance Studios', 6, 'main_hall', '09:00', '13:00')
+        ]
+        cur.executemany("""
+            INSERT INTO regular_schedules (activity_name, organization, day_of_week, room, start_time, end_time)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, schedules)
+
     conn.commit()
     conn.close()
 
@@ -76,34 +133,66 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # 1. Availability check
+        # 1. Availability check: returns both one-off bookings and recurring timetable blocks
         if params.get("availability", ["0"])[0] == "1":
-            date = params.get("date", [""])[0]
+            date_str = params.get("date", [""])[0]
             room = params.get("room", [""])[0]
 
+            busy_slots = []
+
+            # 1a. One-off bookings
             if room and room != "entire_venue":
                 query = """
-                SELECT room, start_time, end_time, status 
+                SELECT room, start_time, end_time, status, 'One-off Booking' as title
                 FROM bookings 
                 WHERE event_date = ? 
                   AND status IN ('confirmed', 'pending')
                   AND (room = ? OR room = 'entire_venue')
                 ORDER BY start_time ASC
                 """
-                cur.execute(query, (date, room))
+                cur.execute(query, (date_str, room))
             else:
                 query = """
-                SELECT room, start_time, end_time, status 
+                SELECT room, start_time, end_time, status, 'One-off Booking' as title
                 FROM bookings 
                 WHERE event_date = ? 
                   AND status IN ('confirmed', 'pending')
                 ORDER BY start_time ASC
                 """
-                cur.execute(query, (date,))
+                cur.execute(query, (date_str,))
+            
+            for row in cur.fetchall():
+                busy_slots.append(dict(row))
 
-            rows = [dict(r) for r in cur.fetchall()]
+            # 1b. Recurring regular timetable (Day of week: Monday=1 ... Sunday=7, SQLite/Python iso format)
+            try:
+                dt = datetime.strptime(date_str, "%Y-%m-%d")
+                day_of_week = dt.isoweekday() # 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun
+                # In schema, 0=Sun, 1=Mon..6=Sat:
+                schema_dow = 0 if day_of_week == 7 else day_of_week
+
+                if room and room != "entire_venue":
+                    cur.execute("""
+                        SELECT room, start_time, end_time, 'confirmed' as status, activity_name as title
+                        FROM regular_schedules
+                        WHERE day_of_week = ?
+                          AND (room = ? OR room = 'entire_venue')
+                    """, (schema_dow, room))
+                else:
+                    cur.execute("""
+                        SELECT room, start_time, end_time, 'confirmed' as status, activity_name as title
+                        FROM regular_schedules
+                        WHERE day_of_week = ?
+                    """, (schema_dow,))
+
+                for row in cur.fetchall():
+                    busy_slots.append(dict(row))
+
+            except ValueError:
+                pass
+
             conn.close()
-            return self.send_json({"bookedSlots": rows})
+            return self.send_json({"bookedSlots": busy_slots})
 
         # 2. Admin get bookings
         auth = self.headers.get("Authorization", "")
@@ -139,7 +228,7 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # Overlap check
+        # Check overlap with existing one-off bookings
         if data["room"] == "entire_venue":
             cur.execute("""
                 SELECT id, room, start_time, end_time 
@@ -163,10 +252,40 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
             """, (data["event_date"], data["room"], data["end_time"], data["start_time"]))
 
         conflict = cur.fetchone()
+
+        # Also check overlap with regular weekly timetable
+        if not conflict:
+            try:
+                dt = datetime.strptime(data["event_date"], "%Y-%m-%d")
+                dow = 0 if dt.isoweekday() == 7 else dt.isoweekday()
+                if data["room"] == "entire_venue":
+                    cur.execute("""
+                        SELECT activity_name, room, start_time, end_time 
+                        FROM regular_schedules 
+                        WHERE day_of_week = ? 
+                          AND start_time < ? 
+                          AND end_time > ?
+                        LIMIT 1
+                    """, (dow, data["end_time"], data["start_time"]))
+                else:
+                    cur.execute("""
+                        SELECT activity_name, room, start_time, end_time 
+                        FROM regular_schedules 
+                        WHERE day_of_week = ? 
+                          AND (room = ? OR room = 'entire_venue')
+                          AND start_time < ? 
+                          AND end_time > ?
+                        LIMIT 1
+                    """, (dow, data["room"], data["end_time"], data["start_time"]))
+                conflict = cur.fetchone()
+            except ValueError:
+                pass
+
         if conflict:
             conn.close()
+            reason = conflict['activity_name'] if 'activity_name' in conflict.keys() else 'existing reservation'
             return self.send_json({
-                "error": f"Clash with existing reservation ({conflict['start_time']} - {conflict['end_time']}). Please choose different hours."
+                "error": f"Clash with {reason} ({conflict['start_time']} - {conflict['end_time']}). Please choose different hours."
             }, 409)
 
         ref_code = "CVH-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
