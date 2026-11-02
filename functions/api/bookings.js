@@ -1,15 +1,65 @@
 // Cloudflare Pages Function: /api/bookings
-// Handles GET (admin fetch all bookings or single by ID/ref) and POST (submit new booking)
+// Handles GET (admin list or public availability check) and POST (submit new booking with overlap check)
 
 export async function onRequestGet(context) {
   const { request, env } = context;
   const url = new URL(request.url);
 
-  // Security check for Admin access
-  const authHeader = request.headers.get("Authorization");
-  const adminSecret = env.ADMIN_SECRET || "admin123";
+  // 1. PUBLIC ENDPOINT: Check availability for a specific room and date
+  // e.g. /api/bookings?availability=1&date=2026-11-15&room=main_hall
+  if (url.searchParams.get("availability") === "1") {
+    const date = url.searchParams.get("date");
+    const room = url.searchParams.get("room");
 
-  // Check if requesting single booking by reference code (public check)
+    if (!date) {
+      return jsonResponse({ error: "Missing required parameter: date" }, 400);
+    }
+
+    if (!env.DB) {
+      // In local preview/demo mode without D1, return sample unavailable slots for illustration
+      return jsonResponse({
+        bookedSlots: [
+          { start_time: "10:00", end_time: "12:00", room: room || "main_hall", reason: "Reserved" },
+          { start_time: "14:00", end_time: "16:30", room: room || "main_hall", reason: "Reserved" }
+        ],
+        demoMode: true
+      });
+    }
+
+    try {
+      // Query bookings that conflict:
+      // If room is specified, match bookings for that room OR entire_venue bookings (or all if requesting entire_venue)
+      let query;
+      let stmt;
+      if (room && room !== "entire_venue") {
+        query = `
+          SELECT room, start_time, end_time, status 
+          FROM bookings 
+          WHERE event_date = ? 
+            AND status IN ('confirmed', 'pending')
+            AND (room = ? OR room = 'entire_venue')
+          ORDER BY start_time ASC
+        `;
+        stmt = env.DB.prepare(query).bind(date, room);
+      } else {
+        query = `
+          SELECT room, start_time, end_time, status 
+          FROM bookings 
+          WHERE event_date = ? 
+            AND status IN ('confirmed', 'pending')
+          ORDER BY start_time ASC
+        `;
+        stmt = env.DB.prepare(query).bind(date);
+      }
+
+      const { results } = await stmt.all();
+      return jsonResponse({ bookedSlots: results || [] });
+    } catch (err) {
+      return jsonResponse({ error: err.message }, 500);
+    }
+  }
+
+  // 2. PUBLIC ENDPOINT: Check single booking by reference code
   const ref = url.searchParams.get("ref");
   if (ref) {
     if (!env.DB) {
@@ -26,7 +76,10 @@ export async function onRequestGet(context) {
     return jsonResponse({ booking: result });
   }
 
-  // Admin list authentication
+  // 3. ADMIN ENDPOINT: List all bookings (Requires Bearer token)
+  const authHeader = request.headers.get("Authorization");
+  const adminSecret = env.ADMIN_SECRET || "admin123";
+
   if (!authHeader || authHeader !== `Bearer ${adminSecret}`) {
     return jsonResponse({ error: "Unauthorized. Valid admin bearer token required." }, 401);
   }
@@ -71,18 +124,59 @@ export async function onRequestPost(context) {
       }
     }
 
-    // Generate readable reference code: CVH-XXXX
+    if (data.start_time >= data.end_time) {
+      return jsonResponse({ error: "End time must be after start time." }, 400);
+    }
+
     const refCode = "CVH-" + Math.random().toString(36).substring(2, 8).toUpperCase();
 
-    // Check DB binding
+    // Fallback if D1 is not bound
     if (!env.DB) {
-      // Graceful fallback for preview/testing without D1 bound
       return jsonResponse({
         success: true,
         reference_code: refCode,
         message: "Booking inquiry recorded (Demo Mode - configure Cloudflare D1 for persistent storage)",
         details: data
       }, 201);
+    }
+
+    // --- OVERLAP CONFLICT GUARD ---
+    // Check if the requested timeslot overlaps with an existing booking:
+    // (RequestedStart < ExistingEnd) AND (RequestedEnd > ExistingStart)
+    let overlapQuery;
+    let overlapStmt;
+
+    if (data.room === "entire_venue") {
+      overlapQuery = `
+        SELECT id, room, start_time, end_time 
+        FROM bookings 
+        WHERE event_date = ? 
+          AND status IN ('confirmed', 'pending')
+          AND start_time < ? 
+          AND end_time > ?
+        LIMIT 1
+      `;
+      overlapStmt = env.DB.prepare(overlapQuery).bind(data.event_date, data.end_time, data.start_time);
+    } else {
+      overlapQuery = `
+        SELECT id, room, start_time, end_time 
+        FROM bookings 
+        WHERE event_date = ? 
+          AND status IN ('confirmed', 'pending')
+          AND (room = ? OR room = 'entire_venue')
+          AND start_time < ? 
+          AND end_time > ?
+        LIMIT 1
+      `;
+      overlapStmt = env.DB.prepare(overlapQuery).bind(data.event_date, data.room, data.end_time, data.start_time);
+    }
+
+    const conflict = await overlapStmt.first();
+    if (conflict) {
+      return jsonResponse({
+        error: `The requested time (${data.start_time} - ${data.end_time}) conflicts with an existing booking (${conflict.start_time} - ${conflict.end_time}). Please choose another time.`,
+        conflict: true
+      }, 409); // 409 Conflict
     }
 
     const stmt = env.DB.prepare(`
@@ -122,7 +216,6 @@ export async function onRequestPost(context) {
   }
 }
 
-// Support updating status / notes by admin
 export async function onRequestPatch(context) {
   const { request, env } = context;
 

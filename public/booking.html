@@ -109,6 +109,21 @@
             <input type="number" id="guest_count" name="guest_count" class="form-control" min="1" max="250" placeholder="e.g. 60" required>
           </div>
 
+          <!-- Availability Visual Panel -->
+          <div class="form-group form-full" id="availabilityContainer" style="display: none;">
+            <div class="availability-panel">
+              <div class="availability-header">
+                <h4 id="availabilityDateTitle">Room Availability Schedule</h4>
+                <div class="legend">
+                  <div class="legend-item"><span class="legend-box" style="background:#dcfce7; border: 1px solid #bbf7d0;"></span> Available</div>
+                  <div class="legend-item"><span class="legend-box" style="background:#fee2e2; border: 1px solid #fecaca;"></span> Booked / Unavailable</div>
+                </div>
+              </div>
+              <p id="availabilitySubtitle" style="font-size:0.8rem; color:var(--text-muted); margin-bottom: 0.5rem;">Select your required times below:</p>
+              <div class="slots-grid" id="slotsGrid"></div>
+            </div>
+          </div>
+
           <div class="form-group">
             <label for="start_time">Start Time (Including Setup) *</label>
             <input type="time" id="start_time" name="start_time" class="form-control" required>
