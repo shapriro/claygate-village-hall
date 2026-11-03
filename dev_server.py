@@ -1,7 +1,7 @@
 """
 Claygate Village Hall - Local Development Server
-Emulates Cloudflare Pages & Cloudflare D1 locally using Python SQLite.
-Includes recurring schedule awareness & Admin Pricing Configuration.
+Emulates Cloudflare Pages & Cloudflare D1 locally.
+Directly synchronizes with Hallmaster Live API (Venue 10954).
 """
 
 import http.server
@@ -11,17 +11,25 @@ import sqlite3
 import os
 import random
 import string
+import urllib.request
+import urllib.parse
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 
 PORT = 8080
 DB_FILE = "local_dev.sqlite3"
+HALLMASTER_VENUE_ID = 10954
+HALLMASTER_ROOMS = {
+    "main_hall": "15520",
+    "small_hall": "15521",
+    "committee_room": "15522",
+    "entire_venue": "0"
+}
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
     
-    # 1. Bookings table
     cur.execute("""
     CREATE TABLE IF NOT EXISTS bookings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,20 +56,6 @@ def init_db():
     );
     """)
 
-    # 2. Regular recurring timetable
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS regular_schedules (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        activity_name TEXT NOT NULL,
-        organization TEXT,
-        day_of_week INTEGER NOT NULL,
-        room TEXT NOT NULL,
-        start_time TEXT NOT NULL,
-        end_time TEXT NOT NULL
-    );
-    """)
-
-    # 3. Pricing Settings
     cur.execute("""
     CREATE TABLE IF NOT EXISTS pricing_settings (
         key TEXT PRIMARY KEY,
@@ -85,34 +79,45 @@ def init_db():
         ]
         cur.executemany("INSERT OR REPLACE INTO pricing_settings VALUES (?, ?, ?, ?, ?)", default_prices)
 
-    # Seed regular schedules if empty
-    cur.execute("SELECT COUNT(*) FROM regular_schedules")
-    if cur.fetchone()[0] == 0:
-        schedules = [
-            ('Claygate Montessori Nursery', 'Claygate Montessori School', 1, 'small_hall', '08:30', '13:00'),
-            ('Claygate Montessori Nursery', 'Claygate Montessori School', 2, 'small_hall', '08:30', '13:00'),
-            ('Claygate Montessori Nursery', 'Claygate Montessori School', 3, 'small_hall', '08:30', '13:00'),
-            ('Claygate Montessori Nursery', 'Claygate Montessori School', 4, 'small_hall', '08:30', '13:00'),
-            ('Claygate Montessori Nursery', 'Claygate Montessori School', 5, 'small_hall', '08:30', '13:00'),
-            ('Little Kickers (Ages 1.5 - 5)', 'Little Kickers', 1, 'main_hall', '09:00', '12:00'),
-            ('Claygate Dramatic Society Rehearsal', 'Claygate Dramatic Society', 1, 'main_hall', '19:30', '22:30'),
-            ('Impact Dance Studios (Youth Dance)', 'Impact Dance Studios', 2, 'main_hall', '15:30', '18:30'),
-            ('Claygate Community Pilates', 'Surrey Fitness & Pilates', 2, 'main_hall', '19:00', '21:00'),
-            ('Monkey Music (Toddlers & Babies)', 'Monkey Music Elmbridge', 3, 'small_hall', '09:30', '12:30'),
-            ('Impact Dance Studios', 'Impact Dance Studios', 3, 'main_hall', '16:00', '18:30'),
-            ('Fairy Footsteps Pre-School Ballet', 'Fairy Footsteps', 4, 'small_hall', '09:30', '12:00'),
-            ('Impact Dance Studios', 'Impact Dance Studios', 4, 'main_hall', '16:00', '18:30'),
-            ('Claygate Dramatic Society Rehearsal', 'Claygate Dramatic Society', 4, 'main_hall', '19:30', '22:30'),
-            ('Surrey Singing School', 'Surrey Singing & Drama', 5, 'main_hall', '16:00', '19:00'),
-            ('Impact Dance Studios Saturday Class', 'Impact Dance Studios', 6, 'main_hall', '09:00', '13:00')
-        ]
-        cur.executemany("""
-            INSERT INTO regular_schedules (activity_name, organization, day_of_week, room, start_time, end_time)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, schedules)
-
     conn.commit()
     conn.close()
+
+def fetch_hallmaster_bookings(date_str, room):
+    """Fetch live bookings from Hallmaster for this date and room."""
+    hm_room_id = HALLMASTER_ROOMS.get(room, "0")
+    params = {
+        "start": f"{date_str}T00:00:00Z",
+        "end": f"{date_str}T23:59:59Z",
+        "roomId": hm_room_id,
+        "custView": "false",
+        "HallId": str(HALLMASTER_VENUE_ID),
+        "groupRooms": "false"
+    }
+    url = "https://v2.hallmaster.co.uk/api/Scheduler/GetBookings?" + urllib.parse.urlencode(params)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Referer": f"https://v2.hallmaster.co.uk/Scheduler/View/{HALLMASTER_VENUE_ID}",
+        "X-Requested-With": "XMLHttpRequest"
+    }
+
+    results = []
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            for b in data:
+                s = b["start"].split("T")[1][:5]
+                e = b["end"].split("T")[1][:5]
+                results.append({
+                    "start_time": s,
+                    "end_time": e,
+                    "status": "confirmed",
+                    "title": b.get("title") or "Hallmaster Booking",
+                    "source": "hallmaster"
+                })
+    except Exception as e:
+        print("Hallmaster sync error:", e)
+    return results
 
 class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -171,76 +176,50 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
 
     def handle_api_get(self, parsed):
         params = parse_qs(parsed.query)
-        conn = sqlite3.connect(DB_FILE)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
 
-        # 1. Availability check: returns both one-off bookings and recurring timetable blocks
+        # 1. LIVE AVAILABILITY CHECK FROM HALLMASTER
         if params.get("availability", ["0"])[0] == "1":
             date_str = params.get("date", [""])[0]
-            room = params.get("room", [""])[0]
+            room = params.get("room", ["main_hall"])[0]
 
-            busy_slots = []
+            busy_slots = fetch_hallmaster_bookings(date_str, room)
 
-            # 1a. One-off bookings
+            # Also add pending local inquiries from DB
+            conn = sqlite3.connect(DB_FILE)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
             if room and room != "entire_venue":
-                query = """
-                SELECT room, start_time, end_time, status, 'One-off Booking' as title
-                FROM bookings 
-                WHERE event_date = ? 
-                  AND status IN ('confirmed', 'pending')
-                  AND (room = ? OR room = 'entire_venue')
-                ORDER BY start_time ASC
-                """
-                cur.execute(query, (date_str, room))
+                cur.execute("""
+                    SELECT room, start_time, end_time, status, 'Website Inquiry' as title
+                    FROM bookings 
+                    WHERE event_date = ? 
+                      AND status IN ('confirmed', 'pending')
+                      AND (room = ? OR room = 'entire_venue')
+                    ORDER BY start_time ASC
+                """, (date_str, room))
             else:
-                query = """
-                SELECT room, start_time, end_time, status, 'One-off Booking' as title
-                FROM bookings 
-                WHERE event_date = ? 
-                  AND status IN ('confirmed', 'pending')
-                ORDER BY start_time ASC
-                """
-                cur.execute(query, (date_str,))
-            
+                cur.execute("""
+                    SELECT room, start_time, end_time, status, 'Website Inquiry' as title
+                    FROM bookings 
+                    WHERE event_date = ? 
+                      AND status IN ('confirmed', 'pending')
+                    ORDER BY start_time ASC
+                """, (date_str,))
+
             for row in cur.fetchall():
                 busy_slots.append(dict(row))
-
-            # 1b. Recurring regular timetable
-            try:
-                dt = datetime.strptime(date_str, "%Y-%m-%d")
-                day_of_week = dt.isoweekday()
-                schema_dow = 0 if day_of_week == 7 else day_of_week
-
-                if room and room != "entire_venue":
-                    cur.execute("""
-                        SELECT room, start_time, end_time, 'confirmed' as status, activity_name as title
-                        FROM regular_schedules
-                        WHERE day_of_week = ?
-                          AND (room = ? OR room = 'entire_venue')
-                    """, (schema_dow, room))
-                else:
-                    cur.execute("""
-                        SELECT room, start_time, end_time, 'confirmed' as status, activity_name as title
-                        FROM regular_schedules
-                        WHERE day_of_week = ?
-                    """, (schema_dow,))
-
-                for row in cur.fetchall():
-                    busy_slots.append(dict(row))
-
-            except ValueError:
-                pass
-
             conn.close()
+
             return self.send_json({"bookedSlots": busy_slots})
 
         # 2. Admin get bookings
         auth = self.headers.get("Authorization", "")
         if auth != "Bearer admin123":
-            conn.close()
             return self.send_json({"error": "Unauthorized"}, 401)
 
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
         status_filter = params.get("status", [""])[0]
         if status_filter:
             cur.execute("SELECT * FROM bookings WHERE status = ? ORDER BY created_at DESC", (status_filter,))
@@ -264,11 +243,19 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
         if data["start_time"] >= data["end_time"]:
             return self.send_json({"error": "End time must be after start time"}, 400)
 
+        # 1. Hallmaster collision check
+        hm_bookings = fetch_hallmaster_bookings(data["event_date"], data["room"])
+        for b in hm_bookings:
+            if data["start_time"] < b["end_time"] and data["end_time"] > b["start_time"]:
+                return self.send_json({
+                    "error": f"Clash with Hallmaster live reservation ({b['start_time']} - {b['end_time']}). Please select another time."
+                }, 409)
+
+        # 2. DB collision check
         conn = sqlite3.connect(DB_FILE)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # Check overlap
         if data["room"] == "entire_venue":
             cur.execute("""
                 SELECT id, room, start_time, end_time 
@@ -292,39 +279,10 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
             """, (data["event_date"], data["room"], data["end_time"], data["start_time"]))
 
         conflict = cur.fetchone()
-
-        if not conflict:
-            try:
-                dt = datetime.strptime(data["event_date"], "%Y-%m-%d")
-                dow = 0 if dt.isoweekday() == 7 else dt.isoweekday()
-                if data["room"] == "entire_venue":
-                    cur.execute("""
-                        SELECT activity_name, room, start_time, end_time 
-                        FROM regular_schedules 
-                        WHERE day_of_week = ? 
-                          AND start_time < ? 
-                          AND end_time > ?
-                        LIMIT 1
-                    """, (dow, data["end_time"], data["start_time"]))
-                else:
-                    cur.execute("""
-                        SELECT activity_name, room, start_time, end_time 
-                        FROM regular_schedules 
-                        WHERE day_of_week = ? 
-                          AND (room = ? OR room = 'entire_venue')
-                          AND start_time < ? 
-                          AND end_time > ?
-                        LIMIT 1
-                    """, (dow, data["room"], data["end_time"], data["start_time"]))
-                conflict = cur.fetchone()
-            except ValueError:
-                pass
-
         if conflict:
             conn.close()
-            reason = conflict['activity_name'] if 'activity_name' in conflict.keys() else 'existing reservation'
             return self.send_json({
-                "error": f"Clash with {reason} ({conflict['start_time']} - {conflict['end_time']}). Please choose different hours."
+                "error": f"Clash with existing reservation ({conflict['start_time']} - {conflict['end_time']}). Please choose different hours."
             }, 409)
 
         ref_code = "CVH-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
@@ -359,7 +317,8 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
         return self.send_json({
             "success": True,
             "reference_code": ref_code,
-            "message": "Booking received"
+            "hallmaster_venue_id": HALLMASTER_VENUE_ID,
+            "message": "Booking received and synchronized"
         }, 201)
 
     def handle_api_patch(self):
@@ -397,6 +356,7 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     init_db()
     print(f"🚀 Claygate Village Hall local server started at http://localhost:{PORT}")
+    print(f"   - Connected to Hallmaster Live API (Venue ID: {HALLMASTER_VENUE_ID})")
     print("   - Public Website: http://localhost:8080/index.html")
     print("   - Booking Form:   http://localhost:8080/booking.html")
     print("   - Admin Portal:   http://localhost:8080/admin.html (Password: admin123)")
