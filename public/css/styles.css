@@ -484,6 +484,108 @@ nav a:hover, nav a.active {
   text-align: right;
 }
 
+/* Pricing Grid on Homepage */
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.pricing-card {
+  background: white;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  padding: 2rem;
+  text-align: center;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.pricing-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+}
+
+.pricing-card.featured {
+  border: 2px solid var(--primary-light);
+  position: relative;
+}
+
+.pricing-card.featured::before {
+  content: "Most Popular";
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--primary);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.2rem 0.75rem;
+  border-radius: 9999px;
+  text-transform: uppercase;
+}
+
+.pricing-card h3 {
+  color: var(--primary-dark);
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.pricing-amount {
+  font-size: 2.25rem;
+  font-weight: 800;
+  color: var(--text-main);
+  margin: 1rem 0 0.25rem;
+}
+
+.pricing-unit {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.pricing-features {
+  list-style: none;
+  text-align: left;
+  margin-bottom: 2rem;
+  flex-grow: 1;
+}
+
+.pricing-features li {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  padding: 0.4rem 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.pricing-features li::before {
+  content: "✓ ";
+  color: var(--success);
+  font-weight: bold;
+}
+
+/* SEO keyword badges & Local Area banner */
+.seo-pill-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-top: 1.5rem;
+}
+
+.seo-pill {
+  background: #e0f2fe;
+  color: #0369a1;
+  padding: 0.35rem 0.85rem;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
 /* Footer */
 footer {
   background: #0f172a;
