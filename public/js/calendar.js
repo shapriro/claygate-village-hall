@@ -66,20 +66,52 @@ async function renderMonthlyCalendar() {
   const firstDayOfMonth = new Date(year, month, 1);
   const lastDayOfMonth = new Date(year, month + 1, 0);
 
-  // Fetch all events for this month range from Hallmaster API
+  // Fetch events for this month range directly from Hallmaster or backend
   const startDateStr = `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const endDateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(lastDayOfMonth.getDate()).padStart(2, "0")}`;
 
+  const hmRoomId = calCurrentRoom; // "0", "15520", "15521", "15522"
+  const hmUrl = `https://v2.hallmaster.co.uk/api/Scheduler/GetBookings?start=${startDateStr}T00:00:00Z&end=${endDateStr}T23:59:59Z&roomId=${hmRoomId}&custView=false&HallId=10954&groupRooms=false`;
+
   try {
-    const res = await fetch(`/api/bookings?availability=1&date=${startDateStr}&monthEnd=${endDateStr}&room=${mapRoomCode(calCurrentRoom)}`);
-    if (res.ok) {
-      const data = await res.json();
-      cachedMonthEvents = data.bookedSlots || [];
+    // 1. Try direct Hallmaster query first
+    const hmRes = await fetch(hmUrl, {
+      headers: {
+        "X-Requested-With": "XMLHttpRequest"
+      }
+    });
+
+    if (hmRes.ok) {
+      const hmList = await hmRes.json();
+      cachedMonthEvents = hmList.map(b => {
+        const sParts = b.start.split("T");
+        const eParts = b.end.split("T");
+        return {
+          start_date: sParts[0],
+          start_time: sParts[1]?.substring(0, 5) || "08:00",
+          end_time: eParts[1]?.substring(0, 5) || "23:00",
+          status: "confirmed",
+          title: b.title || "Private Booking",
+          room_id: b.roomId ? String(b.roomId) : (b.color === "#b30c35" ? "15520" : (b.color === "#0284c7" || b.color === "#428bca" ? "15521" : "15522")),
+          color: b.color
+        };
+      });
     } else {
+      throw new Error("Direct query fallback");
+    }
+  } catch (err) {
+    // 2. Fallback to /api/bookings proxy
+    try {
+      const res = await fetch(`/api/bookings?availability=1&date=${startDateStr}&monthEnd=${endDateStr}&room=${mapRoomCode(calCurrentRoom)}`);
+      if (res.ok) {
+        const data = await res.json();
+        cachedMonthEvents = data.bookedSlots || [];
+      } else {
+        cachedMonthEvents = [];
+      }
+    } catch {
       cachedMonthEvents = [];
     }
-  } catch {
-    cachedMonthEvents = [];
   }
 
   // Build grid
