@@ -1,4 +1,4 @@
-// Monthly Calendar Viewer with Room Filters & 1-Click Booking
+// Monthly Calendar Viewer with Room Filters, Scale Magnifier Slider & Interactive Popups
 let calCurrentDate = new Date();
 let calCurrentRoom = "0"; // 0 = All Rooms
 let cachedMonthEvents = [];
@@ -8,6 +8,65 @@ document.addEventListener("DOMContentLoaded", () => {
   const nextBtn = document.getElementById("calNextMonth");
   const todayBtn = document.getElementById("calToday");
   const roomTabs = document.querySelectorAll(".filter-tab");
+
+  // Scale Magnifier & View Density Controls
+  const fontSlider = document.getElementById("fontSlider");
+  const scaleBadge = document.getElementById("scaleValBadge");
+  const cellCompactBtn = document.getElementById("cellCompactBtn");
+  const cellStandardBtn = document.getElementById("cellStandardBtn");
+  const cellExpandedBtn = document.getElementById("cellExpandedBtn");
+
+  // Modal elements
+  const modalBackdrop = document.getElementById("eventModalBackdrop");
+  const modalCloseBtn = document.getElementById("modalCloseBtn");
+  const modalOkBtn = document.getElementById("modalOkBtn");
+
+  if (fontSlider) {
+    fontSlider.addEventListener("input", (e) => {
+      const val = e.target.value;
+      document.documentElement.style.setProperty("--cal-font-size", `${val}px`);
+      scaleBadge.textContent = `${val}px`;
+    });
+  }
+
+  if (cellCompactBtn && cellStandardBtn && cellExpandedBtn) {
+    cellCompactBtn.addEventListener("click", () => {
+      setCellHeight("100px");
+      toggleDensityButtons(cellCompactBtn);
+    });
+    cellStandardBtn.addEventListener("click", () => {
+      setCellHeight("145px");
+      toggleDensityButtons(cellStandardBtn);
+    });
+    cellExpandedBtn.addEventListener("click", () => {
+      setCellHeight("200px");
+      toggleDensityButtons(cellExpandedBtn);
+    });
+  }
+
+  function setCellHeight(h) {
+    document.documentElement.style.setProperty("--cal-cell-height", h);
+  }
+
+  function toggleDensityButtons(activeBtn) {
+    [cellCompactBtn, cellStandardBtn, cellExpandedBtn].forEach(b => {
+      b.className = "btn btn-outline btn-sm";
+      b.style.padding = "0.2rem 0.55rem";
+      b.style.fontSize = "0.75rem";
+    });
+    activeBtn.className = "btn btn-primary btn-sm";
+    activeBtn.style.padding = "0.2rem 0.55rem";
+    activeBtn.style.fontSize = "0.75rem";
+  }
+
+  // Close modal listeners
+  if (modalCloseBtn) modalCloseBtn.addEventListener("click", closeModal);
+  if (modalOkBtn) modalOkBtn.addEventListener("click", closeModal);
+  if (modalBackdrop) {
+    modalBackdrop.addEventListener("click", (e) => {
+      if (e.target === modalBackdrop) closeModal();
+    });
+  }
 
   if (prevBtn && nextBtn) {
     prevBtn.addEventListener("click", () => {
@@ -42,10 +101,34 @@ document.addEventListener("DOMContentLoaded", () => {
 
     renderMonthlyCalendar();
   }
-
-  // Initialize Room Card Carousel image rotators
-  initRoomGalleries();
 });
+
+function openModal(ev) {
+  const modalBackdrop = document.getElementById("eventModalBackdrop");
+  const modalHeader = document.getElementById("modalHeader");
+  const modalTitle = document.getElementById("modalTitle");
+  const modalRoom = document.getElementById("modalRoom");
+  const modalDate = document.getElementById("modalDate");
+  const modalHours = document.getElementById("modalHours");
+  const modalBookSameDayBtn = document.getElementById("modalBookSameDayBtn");
+
+  const roomName = getRoomName(ev.room_id);
+  const color = ev.color || (ev.room_id === "15520" ? "#b30c35" : (ev.room_id === "15521" ? "#0284c7" : "#15803d"));
+
+  modalHeader.style.background = color;
+  modalTitle.textContent = ev.title || "Private Reservation";
+  modalRoom.textContent = roomName;
+  modalDate.textContent = ev.start_date || "Confirmed Date";
+  modalHours.textContent = `${ev.start_time || '09:00'} - ${ev.end_time || '17:00'}`;
+  modalBookSameDayBtn.href = `/booking.html?date=${ev.start_date}&room=${getRoomSlug(ev.room_id)}`;
+
+  modalBackdrop.classList.add("active");
+}
+
+function closeModal() {
+  const modalBackdrop = document.getElementById("eventModalBackdrop");
+  if (modalBackdrop) modalBackdrop.classList.remove("active");
+}
 
 async function renderMonthlyCalendar() {
   const monthTitle = document.getElementById("calMonthTitle");
@@ -62,25 +145,17 @@ async function renderMonthlyCalendar() {
   monthTitle.textContent = `${monthNames[month]} ${year}`;
   tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding: 2rem; color:var(--text-muted);">Syncing live availability with Hallmaster...</td></tr>`;
 
-  // Calculate start of month grid (Monday start)
   const firstDayOfMonth = new Date(year, month, 1);
   const lastDayOfMonth = new Date(year, month + 1, 0);
 
-  // Fetch events for this month range directly from Hallmaster or backend
   const startDateStr = `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const endDateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(lastDayOfMonth.getDate()).padStart(2, "0")}`;
 
-  const hmRoomId = calCurrentRoom; // "0", "15520", "15521", "15522"
+  const hmRoomId = calCurrentRoom;
   const hmUrl = `https://v2.hallmaster.co.uk/api/Scheduler/GetBookings?start=${startDateStr}T00:00:00Z&end=${endDateStr}T23:59:59Z&roomId=${hmRoomId}&custView=false&HallId=10954&groupRooms=false`;
 
   try {
-    // 1. Try direct Hallmaster query first
-    const hmRes = await fetch(hmUrl, {
-      headers: {
-        "X-Requested-With": "XMLHttpRequest"
-      }
-    });
-
+    const hmRes = await fetch(hmUrl, { headers: { "X-Requested-With": "XMLHttpRequest" } });
     if (hmRes.ok) {
       const hmList = await hmRes.json();
       cachedMonthEvents = hmList.map(b => {
@@ -99,8 +174,7 @@ async function renderMonthlyCalendar() {
     } else {
       throw new Error("Direct query fallback");
     }
-  } catch (err) {
-    // 2. Fallback to /api/bookings proxy
+  } catch {
     try {
       const res = await fetch(`/api/bookings?availability=1&date=${startDateStr}&monthEnd=${endDateStr}&room=${mapRoomCode(calCurrentRoom)}`);
       if (res.ok) {
@@ -114,11 +188,9 @@ async function renderMonthlyCalendar() {
     }
   }
 
-  // Build grid
   tbody.innerHTML = "";
   let dateCursor = new Date(firstDayOfMonth);
-  // Shift to previous Monday if month doesn't start on Monday
-  let dayOfWeek = dateCursor.getDay(); // 0 is Sunday
+  let dayOfWeek = dateCursor.getDay();
   let diff = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
   dateCursor.setDate(dateCursor.getDate() + diff);
 
@@ -140,36 +212,43 @@ async function renderMonthlyCalendar() {
       if (!isCurrentMonth) td.classList.add("other-month");
       if (isToday) td.classList.add("today");
 
-      // Room name parameter for booking link
       const roomSlug = getRoomSlug(calCurrentRoom);
 
-      // Header row inside day cell
       const headerDiv = document.createElement("div");
       headerDiv.className = "day-header";
       headerDiv.innerHTML = `
         <span class="day-number">${dDate}</span>
-        <a href="/booking.html?date=${dStr}${roomSlug ? `&room=${roomSlug}` : ''}" class="day-book-btn" title="Make a booking on this date">+ Book</a>
+        <a href="/booking.html?date=${dStr}${roomSlug ? `&room=${roomSlug}` : ''}" class="day-book-btn" title="Reserve this date">+ Book</a>
       `;
       td.appendChild(headerDiv);
 
-      // Events container
       const eventsContainer = document.createElement("div");
       eventsContainer.className = "events-container";
 
-      // Filter events matching this day
       const dayEvents = cachedMonthEvents.filter(ev => {
-        // Can be date exact or recurring
-        return ev.start_date === dStr || ev.event_date === dStr || (ev.start_time && !ev.start_date);
+        return ev.start_date === dStr || ev.event_date === dStr;
       });
 
       dayEvents.forEach(ev => {
         const pill = document.createElement("div");
         const rClass = getEventRoomClass(ev.room_id || calCurrentRoom);
         pill.className = `event-pill ${rClass}`;
-        const title = ev.title || "Booked";
+        
+        // If specific color exists, apply directly
+        if (ev.color) {
+          pill.style.backgroundColor = ev.color;
+        }
+
+        const title = ev.title || "Private Booking";
         const times = `${ev.start_time || ''} - ${ev.end_time || ''}`;
-        pill.textContent = `${times} ${title}`;
-        pill.title = `${title} (${times})`;
+        
+        // Formatted with line break for clarity
+        pill.innerHTML = `<strong>${times}</strong><br><span style="opacity:0.95;">${title}</span>`;
+        pill.title = `${title} (${times}) - Click for details`;
+
+        // Interactive modal click
+        pill.addEventListener("click", () => openModal(ev));
+
         eventsContainer.appendChild(pill);
       });
 
@@ -181,7 +260,6 @@ async function renderMonthlyCalendar() {
 
     tbody.appendChild(tr);
 
-    // Stop early if we passed the month
     if (dateCursor.getMonth() !== month && row >= 4) {
       break;
     }
@@ -202,72 +280,16 @@ function getRoomSlug(code) {
   return "";
 }
 
+function getRoomName(code) {
+  if (code === "15520" || code === "main_hall") return "Main Hall";
+  if (code === "15521" || code === "small_hall") return "Small Hall";
+  if (code === "15522" || code === "committee_room") return "Committee Room / Dressing Room";
+  return "All Rooms (Complex)";
+}
+
 function getEventRoomClass(roomId) {
   if (roomId === "15520" || roomId === "main_hall") return "event-main";
   if (roomId === "15521" || roomId === "small_hall") return "event-small";
   if (roomId === "15522" || roomId === "committee_room") return "event-committee";
   return "event-main";
-}
-
-// Multi-image gallery carousel for room cards
-function initRoomGalleries() {
-  const galleries = document.querySelectorAll(".room-gallery");
-
-  galleries.forEach(gallery => {
-    const images = gallery.querySelectorAll("img");
-    const counter = gallery.querySelector(".photo-counter");
-    const dotsContainer = gallery.querySelector(".gallery-dots");
-    const prevBtn = gallery.querySelector(".gallery-prev");
-    const nextBtn = gallery.querySelector(".gallery-next");
-
-    if (images.length <= 1) return;
-
-    let currentIndex = 0;
-
-    // Create dots
-    dotsContainer.innerHTML = "";
-    images.forEach((_, idx) => {
-      const dot = document.createElement("div");
-      dot.className = `gallery-dot ${idx === 0 ? "active" : ""}`;
-      dot.addEventListener("click", (e) => {
-        e.stopPropagation();
-        goToSlide(idx);
-      });
-      dotsContainer.appendChild(dot);
-    });
-
-    function update() {
-      images.forEach((img, idx) => {
-        img.classList.toggle("active", idx === currentIndex);
-      });
-      dotsContainer.querySelectorAll(".gallery-dot").forEach((d, idx) => {
-        d.classList.toggle("active", idx === currentIndex);
-      });
-      if (counter) counter.textContent = `${currentIndex + 1} / ${images.length}`;
-    }
-
-    function goToSlide(idx) {
-      currentIndex = idx;
-      update();
-    }
-
-    if (prevBtn) {
-      prevBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        currentIndex = (currentIndex - 1 + images.length) % images.length;
-        update();
-      });
-    }
-
-    if (nextBtn) {
-      nextBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        currentIndex = (currentIndex + 1) % images.length;
-        update();
-      });
-    }
-
-    // Initialize first
-    update();
-  });
 }

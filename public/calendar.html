@@ -61,6 +61,24 @@
         </div>
       </div>
 
+      <!-- NEW: Scale Magnifier & View Density Slider Bar (matching Hallmaster) -->
+      <div class="calendar-slider-bar">
+        <div class="slider-group">
+          <span class="slider-label">🔍 Zoom / Text Size:</span>
+          <span style="font-size:0.75rem; font-weight:700;">A</span>
+          <input type="range" min="9" max="18" value="11" class="font-slider" id="fontSlider" aria-label="Adjust calendar font scale">
+          <span style="font-size:1.05rem; font-weight:700;">A</span>
+          <span class="scale-val-badge" id="scaleValBadge">11px</span>
+        </div>
+
+        <div class="slider-group" style="margin-left:auto;">
+          <span class="slider-label">↕️ Day Cell Height:</span>
+          <button id="cellCompactBtn" class="btn btn-outline btn-sm" style="padding:0.2rem 0.55rem; font-size:0.75rem;">Compact</button>
+          <button id="cellStandardBtn" class="btn btn-primary btn-sm" style="padding:0.2rem 0.55rem; font-size:0.75rem;">Standard</button>
+          <button id="cellExpandedBtn" class="btn btn-outline btn-sm" style="padding:0.2rem 0.55rem; font-size:0.75rem;">Expanded</button>
+        </div>
+      </div>
+
       <!-- Legend -->
       <div style="display:flex; gap:1.25rem; font-size:0.8rem; margin-bottom:1rem; flex-wrap:wrap; align-items:center;">
         <span style="font-weight:700; color:var(--text-muted);">Legend:</span>
@@ -109,6 +127,26 @@
       </div>
     </div>
   </main>
+
+  <!-- Event Details Modal Dialog -->
+  <div class="event-modal-backdrop" id="eventModalBackdrop">
+    <div class="event-modal">
+      <div class="event-modal-header" id="modalHeader">
+        <h4 id="modalTitle" style="font-size:1.1rem; margin:0;">Booking Details</h4>
+        <button id="modalCloseBtn" style="background:none; border:none; color:white; font-size:1.5rem; cursor:pointer; line-height:1;">&times;</button>
+      </div>
+      <div class="event-modal-body">
+        <p><strong>📍 Room:</strong> <span id="modalRoom">Main Hall</span></p>
+        <p><strong>📅 Date:</strong> <span id="modalDate">2026-11-03</span></p>
+        <p><strong>⏰ Hours:</strong> <span id="modalHours">19:30 - 21:30</span></p>
+        <p><strong>ℹ️ Status:</strong> <span id="modalStatus" style="font-weight:700; color:var(--badge-main-hall);">Confirmed Booking</span></p>
+      </div>
+      <div class="event-modal-footer">
+        <button id="modalOkBtn" class="btn btn-outline btn-sm">Close</button>
+        <a id="modalBookSameDayBtn" href="/booking.html" class="btn btn-primary btn-sm">+ Book Other Hours on This Day</a>
+      </div>
+    </div>
+  </div>
 
   <footer>
     <div class="footer-content">
