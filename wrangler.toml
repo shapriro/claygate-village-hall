@@ -1,5 +1,5 @@
 name = "claygate-village-hall"
-main = "functions/api/bookings.js"
+main = "worker.js"
 compatibility_date = "2024-09-23"
 
 [assets]
