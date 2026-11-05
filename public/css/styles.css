@@ -333,30 +333,28 @@ nav a.active::after {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  background: rgba(15, 23, 42, 0.65);
+  background: rgba(15, 23, 42, 0.75);
   backdrop-filter: blur(4px);
   color: white;
-  border: none;
-  width: 32px;
-  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: bold;
-  font-size: 0.9rem;
-  opacity: 0;
-  transition: opacity 0.2s, background 0.2s;
-  z-index: 10;
+  font-size: 1.25rem;
+  opacity: 0.85;
+  transition: all 0.2s;
+  z-index: 20;
 }
 
 .room-gallery:hover .gallery-btn {
   opacity: 1;
-}
-
-.gallery-btn:hover {
-  background: rgba(15, 23, 42, 0.9);
+  background: rgba(15, 23, 42, 0.95);
+  transform: translateY(-50%) scale(1.08);
 }
 
 .gallery-prev { left: 10px; }
@@ -370,21 +368,21 @@ nav a.active::after {
   display: flex;
   justify-content: center;
   gap: 6px;
-  z-index: 10;
+  z-index: 20;
 }
 
 .gallery-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.5);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .gallery-dot.active {
   background: white;
-  width: 18px;
+  width: 20px;
   border-radius: 4px;
 }
 
