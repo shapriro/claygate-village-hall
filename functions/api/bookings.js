@@ -1,5 +1,6 @@
 // Cloudflare Pages Function: /api/bookings
 // Live synchronization with Hallmaster API (Venue 10954 - Claygate Village Hall)
+// Supports single-day check and monthly calendar ranges
 
 const HALLMASTER_VENUE_ID = 10954;
 const HALLMASTER_ROOMS = {
@@ -16,6 +17,7 @@ export async function onRequestGet(context) {
   // 1. AVAILABILITY CHECK: FETCH LIVE FROM HALLMASTER API
   if (url.searchParams.get("availability") === "1") {
     const dateStr = url.searchParams.get("date");
+    const monthEnd = url.searchParams.get("monthEnd");
     const room = url.searchParams.get("room") || "main_hall";
 
     if (!dateStr) {
@@ -25,9 +27,12 @@ export async function onRequestGet(context) {
     const busySlots = [];
     const hmRoomId = HALLMASTER_ROOMS[room] || "0";
 
+    const rangeStart = `${dateStr}T00:00:00Z`;
+    const rangeEnd = monthEnd ? `${monthEnd}T23:59:59Z` : `${dateStr}T23:59:59Z`;
+
     try {
       // Query Hallmaster live scheduler API
-      const hmUrl = `https://v2.hallmaster.co.uk/api/Scheduler/GetBookings?start=${dateStr}T00:00:00Z&end=${dateStr}T23:59:59Z&roomId=${hmRoomId}&custView=false&HallId=${HALLMASTER_VENUE_ID}&groupRooms=false`;
+      const hmUrl = `https://v2.hallmaster.co.uk/api/Scheduler/GetBookings?start=${rangeStart}&end=${rangeEnd}&roomId=${hmRoomId}&custView=false&HallId=${HALLMASTER_VENUE_ID}&groupRooms=false`;
       
       const hmRes = await fetch(hmUrl, {
         headers: {
@@ -40,14 +45,20 @@ export async function onRequestGet(context) {
       if (hmRes.ok) {
         const hmBookings = await hmRes.json();
         for (const b of hmBookings) {
-          // Parse start and end times
-          const sTime = b.start.split("T")[1]?.substring(0, 5) || "08:00";
-          const eTime = b.end.split("T")[1]?.substring(0, 5) || "23:00";
+          const sParts = b.start.split("T");
+          const eParts = b.end.split("T");
+
+          const sDate = sParts[0];
+          const sTime = sParts[1]?.substring(0, 5) || "08:00";
+          const eTime = eParts[1]?.substring(0, 5) || "23:00";
+
           busySlots.push({
+            start_date: sDate,
             start_time: sTime,
             end_time: eTime,
             status: "confirmed",
-            title: b.title || "Hallmaster Reservation",
+            title: b.title || "Private Booking",
+            room_id: b.roomId || hmRoomId,
             source: "hallmaster"
           });
         }
@@ -56,30 +67,19 @@ export async function onRequestGet(context) {
       console.error("Hallmaster fetch error:", err);
     }
 
-    // Also include any local pending/confirmed bookings from D1
+    // Include local bookings from D1
     if (env.DB) {
       try {
         let query;
         let stmt;
-        if (room && room !== "entire_venue") {
-          query = `
-            SELECT room, start_time, end_time, status, 'Website Inquiry' as title
-            FROM bookings 
-            WHERE event_date = ? 
-              AND status IN ('confirmed', 'pending')
-              AND (room = ? OR room = 'entire_venue')
-            ORDER BY start_time ASC
-          `;
-          stmt = env.DB.prepare(query).bind(dateStr, room);
+        if (monthEnd) {
+          query = `SELECT room, event_date as start_date, start_time, end_time, status, 'Website Inquiry' as title FROM bookings WHERE event_date >= ? AND event_date <= ? AND status IN ('confirmed', 'pending') ORDER BY event_date, start_time ASC`;
+          stmt = env.DB.prepare(query).bind(dateStr, monthEnd);
         } else {
-          query = `
-            SELECT room, start_time, end_time, status, 'Website Inquiry' as title
-            FROM bookings 
-            WHERE event_date = ? 
-              AND status IN ('confirmed', 'pending')
-            ORDER BY start_time ASC
-          `;
-          stmt = env.DB.prepare(query).bind(dateStr);
+          query = (room && room !== "entire_venue")
+            ? `SELECT room, event_date as start_date, start_time, end_time, status, 'Website Inquiry' as title FROM bookings WHERE event_date = ? AND status IN ('confirmed', 'pending') AND (room = ? OR room = 'entire_venue') ORDER BY start_time ASC`
+            : `SELECT room, event_date as start_date, start_time, end_time, status, 'Website Inquiry' as title FROM bookings WHERE event_date = ? AND status IN ('confirmed', 'pending') ORDER BY start_time ASC`;
+          stmt = (room && room !== "entire_venue") ? env.DB.prepare(query).bind(dateStr, room) : env.DB.prepare(query).bind(dateStr);
         }
 
         const { results } = await stmt.all();

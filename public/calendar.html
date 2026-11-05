@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Availability Calendar | Claygate Village Hall</title>
+  <meta name="description" content="View live room availability across the Main Hall, Small Hall, and Committee Room for Claygate Village Hall. Directly synced with Hallmaster.">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+  <header>
+    <div class="nav-container">
+      <a href="/index.html" class="brand">
+        <div class="brand-icon">CVH</div>
+        <div>
+          <div class="brand-title">Claygate Village Hall</div>
+          <div class="brand-sub">Live Availability & Timetable</div>
+        </div>
+      </a>
+      <nav>
+        <ul>
+          <li><a href="/index.html">Home</a></li>
+          <li><a href="/index.html#facilities">Rooms & Photos</a></li>
+          <li><a href="/calendar.html" class="active">Monthly Calendar</a></li>
+          <li><a href="/index.html#pricing">Hire Rates</a></li>
+          <li><a href="/booking.html" class="btn btn-primary btn-sm">Make a Booking</a></li>
+          <li><a href="/admin.html" class="btn btn-outline btn-sm">Admin</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main class="section">
+    <div class="section-header">
+      <h2>Live Availability Calendar</h2>
+      <p>Browse booked times and open slots across all rooms. Synchronized in real time with the Hallmaster booking system.</p>
+    </div>
+
+    <div class="calendar-view-container">
+      <!-- Calendar Controls Bar -->
+      <div class="calendar-topbar">
+        <!-- Room Filter Tabs -->
+        <div class="room-filter-tabs">
+          <div class="filter-tab active-all" data-room="0">All Rooms</div>
+          <div class="filter-tab" data-room="15520">Main Hall</div>
+          <div class="filter-tab" data-room="15521">Small Hall</div>
+          <div class="filter-tab" data-room="15522">Committee Room</div>
+        </div>
+
+        <!-- Month Navigation -->
+        <div class="calendar-nav">
+          <button id="calPrevMonth" class="btn btn-outline btn-sm">&larr; Prev</button>
+          <h3 id="calMonthTitle">Loading...</h3>
+          <button id="calNextMonth" class="btn btn-outline btn-sm">Next &rarr;</button>
+          <button id="calToday" class="btn btn-outline btn-sm" style="font-size:0.75rem;">Today</button>
+        </div>
+
+        <div>
+          <a href="/booking.html" class="btn btn-primary btn-sm">+ Book Any Date</a>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div style="display:flex; gap:1.25rem; font-size:0.8rem; margin-bottom:1rem; flex-wrap:wrap; align-items:center;">
+        <span style="font-weight:700; color:var(--text-muted);">Legend:</span>
+        <div style="display:flex; align-items:center; gap:0.4rem;">
+          <span style="width:14px; height:14px; border-radius:3px; background:var(--badge-main-hall);"></span>
+          <span>Main Hall Booking</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.4rem;">
+          <span style="width:14px; height:14px; border-radius:3px; background:var(--badge-small-hall);"></span>
+          <span>Small Hall Booking</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.4rem;">
+          <span style="width:14px; height:14px; border-radius:3px; background:var(--badge-committee);"></span>
+          <span>Committee Room Booking</span>
+        </div>
+        <div style="margin-left:auto; font-size:0.78rem; color:var(--text-muted);">
+          ℹ️ Click <strong>+ Book</strong> on any day to start a reservation.
+        </div>
+      </div>
+
+      <!-- Calendar Table -->
+      <div style="overflow-x: auto;">
+        <table class="calendar-grid">
+          <thead>
+            <tr>
+              <th>Mon</th>
+              <th>Tue</th>
+              <th>Wed</th>
+              <th>Thu</th>
+              <th>Fri</th>
+              <th>Sat</th>
+              <th>Sun</th>
+            </tr>
+          </thead>
+          <tbody id="calendarBody">
+            <tr>
+              <td colspan="7" style="text-align:center; padding: 2rem;">Loading live calendar...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Hallmaster direct link option -->
+      <div style="margin-top: 1.5rem; text-align:right; font-size:0.85rem; color:var(--text-muted);">
+        Powered by Hallmaster &bull; <a href="https://v2.hallmaster.co.uk/Scheduler/View/10954" target="_blank" rel="noopener" style="color:var(--primary);">Open Original Hallmaster View &rarr;</a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-content">
+      <div class="footer-col">
+        <h4>Claygate Village Hall</h4>
+        <p>Church Road, Claygate, Esher, Surrey, KT10 0JP</p>
+        <p style="margin-top:0.5rem;">Registered Charity: 305008</p>
+      </div>
+      <div class="footer-col">
+        <h4>Contact & Lettings</h4>
+        <ul>
+          <li>Email: enquiries@claygatevillagehall.co.uk</li>
+          <li>Phone: 07546 941516</li>
+          <li>Office Hours: Mon–Fri 9:00 - 17:00</li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Quick Navigation</h4>
+        <ul>
+          <li><a href="/index.html">Home</a></li>
+          <li><a href="/index.html#facilities">Rooms & Photo Galleries</a></li>
+          <li><a href="/calendar.html">Monthly Live Calendar</a></li>
+          <li><a href="/booking.html">Booking Form</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>&copy; 2026 Claygate Village Hall Management Committee. Powered by Cloudflare & Hallmaster.</p>
+    </div>
+  </footer>
+
+  <script src="/js/calendar.js"></script>
+</body>
+</html>

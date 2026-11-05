@@ -2,6 +2,7 @@
 Claygate Village Hall - Local Development Server
 Emulates Cloudflare Pages & Cloudflare D1 locally.
 Directly synchronizes with Hallmaster Live API (Venue 10954).
+Supports monthly range availability checks.
 """
 
 import http.server
@@ -82,12 +83,12 @@ def init_db():
     conn.commit()
     conn.close()
 
-def fetch_hallmaster_bookings(date_str, room):
-    """Fetch live bookings from Hallmaster for this date and room."""
+def fetch_hallmaster_bookings(start_date, end_date, room):
+    """Fetch live bookings from Hallmaster for this date range and room."""
     hm_room_id = HALLMASTER_ROOMS.get(room, "0")
     params = {
-        "start": f"{date_str}T00:00:00Z",
-        "end": f"{date_str}T23:59:59Z",
+        "start": f"{start_date}T00:00:00Z",
+        "end": f"{end_date}T23:59:59Z",
         "roomId": hm_room_id,
         "custView": "false",
         "HallId": str(HALLMASTER_VENUE_ID),
@@ -103,16 +104,18 @@ def fetch_hallmaster_bookings(date_str, room):
     results = []
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             for b in data:
-                s = b["start"].split("T")[1][:5]
-                e = b["end"].split("T")[1][:5]
+                s_parts = b["start"].split("T")
+                e_parts = b["end"].split("T")
                 results.append({
-                    "start_time": s,
-                    "end_time": e,
+                    "start_date": s_parts[0],
+                    "start_time": s_parts[1][:5],
+                    "end_time": e_parts[1][:5],
                     "status": "confirmed",
-                    "title": b.get("title") or "Hallmaster Booking",
+                    "title": b.get("title") or "Private Booking",
+                    "room_id": b.get("roomId") or hm_room_id,
                     "source": "hallmaster"
                 })
     except Exception as e:
@@ -177,34 +180,45 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
     def handle_api_get(self, parsed):
         params = parse_qs(parsed.query)
 
-        # 1. LIVE AVAILABILITY CHECK FROM HALLMASTER
+        # 1. LIVE AVAILABILITY CHECK FROM HALLMASTER (Single Day or Monthly Range)
         if params.get("availability", ["0"])[0] == "1":
             date_str = params.get("date", [""])[0]
+            month_end = params.get("monthEnd", [""])[0]
             room = params.get("room", ["main_hall"])[0]
 
-            busy_slots = fetch_hallmaster_bookings(date_str, room)
+            end_date = month_end if month_end else date_str
+            busy_slots = fetch_hallmaster_bookings(date_str, end_date, room)
 
             # Also add pending local inquiries from DB
             conn = sqlite3.connect(DB_FILE)
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
-            if room and room != "entire_venue":
+            if month_end:
                 cur.execute("""
-                    SELECT room, start_time, end_time, status, 'Website Inquiry' as title
+                    SELECT room, event_date as start_date, start_time, end_time, status, 'Website Inquiry' as title
                     FROM bookings 
-                    WHERE event_date = ? 
+                    WHERE event_date >= ? AND event_date <= ?
                       AND status IN ('confirmed', 'pending')
-                      AND (room = ? OR room = 'entire_venue')
-                    ORDER BY start_time ASC
-                """, (date_str, room))
+                    ORDER BY event_date, start_time ASC
+                """, (date_str, month_end))
             else:
-                cur.execute("""
-                    SELECT room, start_time, end_time, status, 'Website Inquiry' as title
-                    FROM bookings 
-                    WHERE event_date = ? 
-                      AND status IN ('confirmed', 'pending')
-                    ORDER BY start_time ASC
-                """, (date_str,))
+                if room and room != "entire_venue":
+                    cur.execute("""
+                        SELECT room, event_date as start_date, start_time, end_time, status, 'Website Inquiry' as title
+                        FROM bookings 
+                        WHERE event_date = ? 
+                          AND status IN ('confirmed', 'pending')
+                          AND (room = ? OR room = 'entire_venue')
+                        ORDER BY start_time ASC
+                    """, (date_str, room))
+                else:
+                    cur.execute("""
+                        SELECT room, event_date as start_date, start_time, end_time, status, 'Website Inquiry' as title
+                        FROM bookings 
+                        WHERE event_date = ? 
+                          AND status IN ('confirmed', 'pending')
+                        ORDER BY start_time ASC
+                    """, (date_str,))
 
             for row in cur.fetchall():
                 busy_slots.append(dict(row))
@@ -244,7 +258,7 @@ class LocalDevHandler(http.server.SimpleHTTPRequestHandler):
             return self.send_json({"error": "End time must be after start time"}, 400)
 
         # 1. Hallmaster collision check
-        hm_bookings = fetch_hallmaster_bookings(data["event_date"], data["room"])
+        hm_bookings = fetch_hallmaster_bookings(data["event_date"], data["event_date"], data["room"])
         for b in hm_bookings:
             if data["start_time"] < b["end_time"] and data["end_time"] > b["start_time"]:
                 return self.send_json({
@@ -358,6 +372,7 @@ if __name__ == "__main__":
     print(f"🚀 Claygate Village Hall local server started at http://localhost:{PORT}")
     print(f"   - Connected to Hallmaster Live API (Venue ID: {HALLMASTER_VENUE_ID})")
     print("   - Public Website: http://localhost:8080/index.html")
+    print("   - Monthly Calendar: http://localhost:8080/calendar.html")
     print("   - Booking Form:   http://localhost:8080/booking.html")
     print("   - Admin Portal:   http://localhost:8080/admin.html (Password: admin123)")
     with socketserver.TCPServer(("", PORT), LocalDevHandler) as httpd:
