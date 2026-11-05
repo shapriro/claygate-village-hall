@@ -31,122 +31,40 @@
     </div>
   </header>
 
-  <main class="section">
+  <main class="section" style="max-width: 1400px;">
     <div class="section-header">
       <h2>Live Availability Calendar</h2>
-      <p>Browse booked times and open slots across all rooms. Synchronized in real time with the Hallmaster booking system.</p>
+      <p>Directly powered by the official <strong>Hallmaster System</strong>. Use the built-in room selectors and font magnifier slider below to view all open and booked slots.</p>
     </div>
 
-    <div class="calendar-view-container">
-      <!-- Calendar Controls Bar -->
-      <div class="calendar-topbar">
-        <!-- Room Filter Tabs -->
-        <div class="room-filter-tabs">
-          <div class="filter-tab active-all" data-room="0">All Rooms</div>
-          <div class="filter-tab" data-room="15520">Main Hall</div>
-          <div class="filter-tab" data-room="15521">Small Hall</div>
-          <div class="filter-tab" data-room="15522">Committee Room</div>
+    <div class="calendar-view-container" style="padding: 1.25rem;">
+      <!-- Quick Booking Action Header -->
+      <div class="view-toggle-bar">
+        <div style="display:flex; align-items:center; gap:0.75rem;">
+          <span style="font-weight:700; color:var(--primary-dark); font-size:1.05rem;">Claygate Village Hall Live Timetable</span>
+          <span class="badge badge-main" style="margin:0; font-size:0.7rem;">Live Synchronized</span>
         </div>
-
-        <!-- Month Navigation -->
-        <div class="calendar-nav">
-          <button id="calPrevMonth" class="btn btn-outline btn-sm">&larr; Prev</button>
-          <h3 id="calMonthTitle">Loading...</h3>
-          <button id="calNextMonth" class="btn btn-outline btn-sm">Next &rarr;</button>
-          <button id="calToday" class="btn btn-outline btn-sm" style="font-size:0.75rem;">Today</button>
-        </div>
-
-        <div>
-          <a href="/booking.html" class="btn btn-primary btn-sm">+ Book Any Date</a>
+        <div style="display:flex; gap:0.75rem; align-items:center;">
+          <a href="/booking.html" class="btn btn-primary btn-sm">⚡ Book a Room Online</a>
+          <a href="https://v2.hallmaster.co.uk/Scheduler/View/10954" target="_blank" rel="noopener" class="btn btn-outline btn-sm">↗ Full Screen View</a>
         </div>
       </div>
 
-      <!-- NEW: Scale Magnifier & View Density Slider Bar (matching Hallmaster) -->
-      <div class="calendar-slider-bar">
-        <div class="slider-group">
-          <span class="slider-label">🔍 Zoom / Text Size:</span>
-          <span style="font-size:0.75rem; font-weight:700;">A</span>
-          <input type="range" min="9" max="18" value="11" class="font-slider" id="fontSlider" aria-label="Adjust calendar font scale">
-          <span style="font-size:1.05rem; font-weight:700;">A</span>
-          <span class="scale-val-badge" id="scaleValBadge">11px</span>
-        </div>
+      <!-- Native Hallmaster Scheduler Embed with Native Magnifier, Room Selectors, Month/Week/Day Views -->
+      <iframe 
+        id="hallmasterFrame"
+        src="https://v2.hallmaster.co.uk/Scheduler/View/10954?startRoom=0&startView=dayGridMonth" 
+        class="hallmaster-embed-frame"
+        title="Claygate Village Hall Association Scheduler"
+        allowfullscreen>
+      </iframe>
 
-        <div class="slider-group" style="margin-left:auto;">
-          <span class="slider-label">↕️ Day Cell Height:</span>
-          <button id="cellCompactBtn" class="btn btn-outline btn-sm" style="padding:0.2rem 0.55rem; font-size:0.75rem;">Compact</button>
-          <button id="cellStandardBtn" class="btn btn-primary btn-sm" style="padding:0.2rem 0.55rem; font-size:0.75rem;">Standard</button>
-          <button id="cellExpandedBtn" class="btn btn-outline btn-sm" style="padding:0.2rem 0.55rem; font-size:0.75rem;">Expanded</button>
-        </div>
-      </div>
-
-      <!-- Legend -->
-      <div style="display:flex; gap:1.25rem; font-size:0.8rem; margin-bottom:1rem; flex-wrap:wrap; align-items:center;">
-        <span style="font-weight:700; color:var(--text-muted);">Legend:</span>
-        <div style="display:flex; align-items:center; gap:0.4rem;">
-          <span style="width:14px; height:14px; border-radius:3px; background:var(--badge-main-hall);"></span>
-          <span>Main Hall Booking</span>
-        </div>
-        <div style="display:flex; align-items:center; gap:0.4rem;">
-          <span style="width:14px; height:14px; border-radius:3px; background:var(--badge-small-hall);"></span>
-          <span>Small Hall Booking</span>
-        </div>
-        <div style="display:flex; align-items:center; gap:0.4rem;">
-          <span style="width:14px; height:14px; border-radius:3px; background:var(--badge-committee);"></span>
-          <span>Committee Room Booking</span>
-        </div>
-        <div style="margin-left:auto; font-size:0.78rem; color:var(--text-muted);">
-          ℹ️ Click <strong>+ Book</strong> on any day to start a reservation.
-        </div>
-      </div>
-
-      <!-- Calendar Table -->
-      <div style="overflow-x: auto;">
-        <table class="calendar-grid">
-          <thead>
-            <tr>
-              <th>Mon</th>
-              <th>Tue</th>
-              <th>Wed</th>
-              <th>Thu</th>
-              <th>Fri</th>
-              <th>Sat</th>
-              <th>Sun</th>
-            </tr>
-          </thead>
-          <tbody id="calendarBody">
-            <tr>
-              <td colspan="7" style="text-align:center; padding: 2rem;">Loading live calendar...</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Hallmaster direct link option -->
-      <div style="margin-top: 1.5rem; text-align:right; font-size:0.85rem; color:var(--text-muted);">
-        Powered by Hallmaster &bull; <a href="https://v2.hallmaster.co.uk/Scheduler/View/10954" target="_blank" rel="noopener" style="color:var(--primary);">Open Original Hallmaster View &rarr;</a>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:1rem; font-size:0.85rem; color:var(--text-muted); flex-wrap:wrap; gap:0.5rem;">
+        <span>ℹ️ Click any event in the calendar above to view reservation details, or use the <strong>A — A</strong> slider to magnify text.</span>
+        <span>Powered by Hallmaster &bull; Venue #10954</span>
       </div>
     </div>
   </main>
-
-  <!-- Event Details Modal Dialog -->
-  <div class="event-modal-backdrop" id="eventModalBackdrop">
-    <div class="event-modal">
-      <div class="event-modal-header" id="modalHeader">
-        <h4 id="modalTitle" style="font-size:1.1rem; margin:0;">Booking Details</h4>
-        <button id="modalCloseBtn" style="background:none; border:none; color:white; font-size:1.5rem; cursor:pointer; line-height:1;">&times;</button>
-      </div>
-      <div class="event-modal-body">
-        <p><strong>📍 Room:</strong> <span id="modalRoom">Main Hall</span></p>
-        <p><strong>📅 Date:</strong> <span id="modalDate">2026-11-03</span></p>
-        <p><strong>⏰ Hours:</strong> <span id="modalHours">19:30 - 21:30</span></p>
-        <p><strong>ℹ️ Status:</strong> <span id="modalStatus" style="font-weight:700; color:var(--badge-main-hall);">Confirmed Booking</span></p>
-      </div>
-      <div class="event-modal-footer">
-        <button id="modalOkBtn" class="btn btn-outline btn-sm">Close</button>
-        <a id="modalBookSameDayBtn" href="/booking.html" class="btn btn-primary btn-sm">+ Book Other Hours on This Day</a>
-      </div>
-    </div>
-  </div>
 
   <footer>
     <div class="footer-content">
@@ -178,6 +96,5 @@
     </div>
   </footer>
 
-  <script src="/js/calendar.js"></script>
 </body>
 </html>
