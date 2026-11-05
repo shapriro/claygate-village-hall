@@ -1,4 +1,4 @@
-name = "patient-river-d3be"
+name = "claygate-village-hall"
 main = "functions/api/bookings.js"
 compatibility_date = "2024-09-23"
 
