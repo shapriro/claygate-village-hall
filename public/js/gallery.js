@@ -1,7 +1,9 @@
 // Multi-image gallery carousel for room cards
-document.addEventListener("DOMContentLoaded", () => {
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initRoomGalleries);
+} else {
   initRoomGalleries();
-});
+}
 
 function initRoomGalleries() {
   const galleries = document.querySelectorAll(".room-gallery");
@@ -23,6 +25,8 @@ function initRoomGalleries() {
       images.forEach((_, idx) => {
         const dot = document.createElement("div");
         dot.className = `gallery-dot ${idx === 0 ? "active" : ""}`;
+        dot.setAttribute("role", "button");
+        dot.setAttribute("aria-label", `Slide ${idx + 1}`);
         dot.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -50,29 +54,32 @@ function initRoomGalleries() {
     }
 
     if (prevBtn) {
-      prevBtn.addEventListener("click", (e) => {
+      prevBtn.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
         currentIndex = (currentIndex - 1 + images.length) % images.length;
         update();
-      });
+      };
     }
 
     if (nextBtn) {
-      nextBtn.addEventListener("click", (e) => {
+      nextBtn.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
         currentIndex = (currentIndex + 1) % images.length;
         update();
-      });
+      };
     }
 
-    // Allow clicking the photo itself to advance
-    gallery.addEventListener("click", (e) => {
-      if (e.target.tagName.toLowerCase() === "img") {
+    // Clicking image advances photo
+    images.forEach(img => {
+      img.style.cursor = "pointer";
+      img.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         currentIndex = (currentIndex + 1) % images.length;
         update();
-      }
+      };
     });
 
     update();
