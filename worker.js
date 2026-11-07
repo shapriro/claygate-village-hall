@@ -95,17 +95,43 @@ async function handleBookingsApi(request, url, env) {
   return jsonResponse({ error: "Method not allowed" }, 405);
 }
 
-function handlePricingApi(request, env) {
-  const defaultPricing = [
-    { key: "rate_main_hall", name: "Main Hall", category: "room_rate", price: 16.00, unit: "per_hour" },
-    { key: "rate_small_hall", name: "Small Hall", category: "room_rate", price: 11.00, unit: "per_hour" },
-    { key: "rate_committee_room", name: "Committee Room", category: "room_rate", price: 8.00, unit: "per_hour" },
-    { key: "rate_entire_venue", name: "Entire Complex", category: "room_rate", price: 25.00, unit: "per_hour" },
-    { key: "rate_stage_av", name: "Stage Lighting & PA System", category: "addon", price: 25.00, unit: "per_event" },
-    { key: "rate_kitchen_commercial", name: "Commercial Kitchen & Cooker/Dishwasher", category: "addon", price: 10.00, unit: "per_event" },
-    { key: "rate_deposit", name: "Refundable Security Deposit", category: "deposit", price: 50.00, unit: "flat" }
+// In-memory runtime pricing state for the worker (supports customized matrix by facility + category)
+let customPricingMatrix = null;
+
+function getDefaultPricing() {
+  return [
+    { key: "main_hall_all", room: "main_hall", category: "all", name: "Main Hall (Standard)", price: 16.00, unit: "per_hour" },
+    { key: "main_hall_wedding_reception", room: "main_hall", category: "wedding_reception", name: "Main Hall (Wedding Reception)", price: 22.00, unit: "per_hour" },
+    { key: "main_hall_private_party", room: "main_hall", category: "private_party", name: "Main Hall (Children / Family Party)", price: 16.00, unit: "per_hour" },
+    { key: "main_hall_fitness_class", room: "main_hall", category: "fitness_class", name: "Main Hall (Fitness / Regular Class)", price: 14.00, unit: "per_hour" },
+    { key: "small_hall_all", room: "small_hall", category: "all", name: "Small Hall (Standard)", price: 11.00, unit: "per_hour" },
+    { key: "small_hall_fitness_class", room: "small_hall", category: "fitness_class", name: "Small Hall (Yoga / Pilates Class)", price: 10.00, unit: "per_hour" },
+    { key: "small_hall_private_party", room: "small_hall", category: "private_party", name: "Small Hall (Children Party under 11)", price: 11.00, unit: "per_hour" },
+    { key: "committee_room_all", room: "committee_room", category: "all", name: "Committee Room (Standard)", price: 8.00, unit: "per_hour" },
+    { key: "committee_room_meeting_conference", room: "committee_room", category: "meeting_conference", name: "Committee Room (Corporate / Meeting)", price: 10.00, unit: "per_hour" },
+    { key: "entire_venue_all", room: "entire_venue", category: "all", name: "Entire Complex (Standard Exclusive)", price: 25.00, unit: "per_hour" },
+    { key: "entire_venue_wedding_reception", room: "entire_venue", category: "wedding_reception", name: "Entire Complex (Wedding / Celebration)", price: 32.00, unit: "per_hour" },
+    { key: "stage_av_all", room: "stage_av", category: "all", name: "Stage Lighting & PA System", price: 25.00, unit: "per_event" },
+    { key: "kitchen_commercial_all", room: "kitchen_commercial", category: "all", name: "Commercial Kitchen Usage", price: 10.00, unit: "per_event" },
+    { key: "deposit_all", room: "deposit", category: "all", name: "Refundable Security Deposit", price: 50.00, unit: "flat" }
   ];
-  return jsonResponse({ pricing: defaultPricing });
+}
+
+async function handlePricingApi(request, env) {
+  if (request.method === "POST") {
+    try {
+      const body = await request.json();
+      if (Array.isArray(body.pricing)) {
+        customPricingMatrix = body.pricing;
+      }
+      return jsonResponse({ success: true, message: "Pricing saved" });
+    } catch (err) {
+      return jsonResponse({ error: "Invalid pricing payload: " + err.message }, 400);
+    }
+  }
+
+  const pricing = customPricingMatrix || getDefaultPricing();
+  return jsonResponse({ pricing });
 }
 
 function jsonResponse(data, status = 200) {

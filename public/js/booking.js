@@ -22,15 +22,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   let bookedSlots = [];
   let currentCost = 0.0;
 
+  const eventTypeSelect = document.getElementById("event_type");
+  let rawPricingRules = [];
+
   // Default prices fallback
   let pricingTable = {
-    rate_main_hall: 16.0,
-    rate_small_hall: 11.0,
-    rate_committee_room: 8.0,
-    rate_entire_venue: 25.0,
-    rate_stage_av: 25.0,
-    rate_kitchen_commercial: 10.0,
-    rate_deposit: 50.0
+    main_hall_all: 16.0,
+    main_hall_wedding_reception: 22.0,
+    small_hall_all: 11.0,
+    committee_room_all: 8.0,
+    entire_venue_all: 25.0,
+    stage_av_all: 25.0,
+    kitchen_commercial_all: 10.0,
+    deposit_all: 50.0
   };
 
   // Fetch live pricing from server
@@ -38,11 +42,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     const pRes = await fetch("/api/pricing");
     if (pRes.ok) {
       const pData = await pRes.json();
-      (pData.pricing || []).forEach(p => {
+      rawPricingRules = pData.pricing || [];
+      rawPricingRules.forEach(p => {
         pricingTable[p.key] = parseFloat(p.price) || 0.0;
       });
     }
   } catch (err) {
+    console.warn("Using fallback pricing table:", err);
+  }
     console.warn("Using fallback pricing table:", err);
   }
 
@@ -278,6 +285,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Event listeners for schedule & price recalculations
   roomSelect.addEventListener("change", () => { checkSchedule(); calculateCost(); });
+  if (eventTypeSelect) eventTypeSelect.addEventListener("change", calculateCost);
   dateInput.addEventListener("change", checkSchedule);
   startTimeInput.addEventListener("change", () => { validateChosenTimes(); calculateCost(); });
   endTimeInput.addEventListener("change", () => { validateChosenTimes(); calculateCost(); });
@@ -480,6 +488,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // --- Dynamic Live Cost Calculator ---
   function calculateCost() {
     const room = roomSelect.value;
+    const eventType = eventTypeSelect ? eventTypeSelect.value : "";
     const s = startTimeInput.value;
     const e = endTimeInput.value;
 
@@ -498,23 +507,42 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    const hourlyRateKey = `rate_${room}`;
-    const hourlyRate = pricingTable[hourlyRateKey] || 16.0;
+    // Determine hourly rate: Unique key is Facility + Booking Category
+    // 1st Priority: specific match (e.g. main_hall_wedding_reception)
+    // 2nd Priority: general standard match (e.g. main_hall_all)
+    // 3rd Priority: legacy rate_ keys or sensible defaults
+    let hourlyRate = 16.0;
+    const specificKey = `${room}_${eventType}`;
+    const standardKey = `${room}_all`;
+    const legacyKey = `rate_${room}`;
+
+    if (pricingTable[specificKey] !== undefined) {
+      hourlyRate = pricingTable[specificKey];
+    } else if (pricingTable[standardKey] !== undefined) {
+      hourlyRate = pricingTable[standardKey];
+    } else if (pricingTable[legacyKey] !== undefined) {
+      hourlyRate = pricingTable[legacyKey];
+    } else {
+      const roomDefaults = { main_hall: 16.0, small_hall: 11.0, committee_room: 8.0, entire_venue: 25.0 };
+      hourlyRate = roomDefaults[room] || 16.0;
+    }
+
     const roomCost = durationHours * hourlyRate;
 
     let total = roomCost;
+    const eventLabel = eventType ? ` &bull; ${formatCategory(eventType)}` : "";
     const breakdown = [
-      `<li><span>${formatRoom(room)} (${durationHours.toFixed(1)} hrs @ £${hourlyRate.toFixed(2)}/hr)</span> <strong>£${roomCost.toFixed(2)}</strong></li>`
+      `<li><span>${formatRoom(room)}${eventLabel} (${durationHours.toFixed(1)} hrs @ £${hourlyRate.toFixed(2)}/hr)</span> <strong>£${roomCost.toFixed(2)}</strong></li>`
     ];
 
     if (stageCheckbox.checked) {
-      const stageFee = pricingTable["rate_stage_av"] || 25.0;
+      const stageFee = pricingTable["stage_av_all"] || pricingTable["rate_stage_av"] || 25.0;
       total += stageFee;
       breakdown.push(`<li><span>Stage & PA System (Flat fee)</span> <strong>£${stageFee.toFixed(2)}</strong></li>`);
     }
 
     if (kitchenCheckbox.checked) {
-      const kitchenFee = pricingTable["rate_kitchen_commercial"] || 10.0;
+      const kitchenFee = pricingTable["kitchen_commercial_all"] || pricingTable["rate_kitchen_commercial"] || 10.0;
       total += kitchenFee;
       breakdown.push(`<li><span>Commercial Kitchen / Dishwasher Usage</span> <strong>£${kitchenFee.toFixed(2)}</strong></li>`);
     }
@@ -523,6 +551,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     displayTotalCost.textContent = `£${total.toFixed(2)}`;
     costBreakdownList.innerHTML = breakdown.join("");
     costContainer.style.display = "block";
+  }
+
+  function formatCategory(cat) {
+    const map = {
+      all: "Standard",
+      private_party: "Private Party",
+      wedding_reception: "Wedding Reception",
+      fitness_class: "Fitness/Class",
+      theatrical_performance: "Stage/Show",
+      meeting_conference: "Meeting/Conference",
+      other: "Community"
+    };
+    return map[cat] || cat;
   }
 
   function showError(msg) {

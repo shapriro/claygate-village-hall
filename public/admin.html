@@ -47,71 +47,150 @@
 
     <!-- Dashboard View -->
     <div id="dashboardSection" style="display:none;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
-        <div>
-          <h2>Booking Requests</h2>
-          <p style="color: var(--text-muted); font-size: 0.9rem;">Review and manage inquiries for Claygate Village Hall</p>
-        </div>
-        <div style="display: flex; gap: 0.75rem; align-items: center;">
-          <select id="filterStatus" class="form-control" style="width: auto;">
-            <option value="">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="confirmed">Confirmed</option>
-            <option value="declined">Declined</option>
-          </select>
-          <button id="refreshBtn" class="btn btn-outline btn-sm">↻ Refresh</button>
-        </div>
+
+      <!-- Admin Top Tab Navigation -->
+      <div class="admin-tab-nav">
+        <button type="button" class="admin-tab-btn active" data-tab="tab-bookings">
+          📋 Booking Requests
+        </button>
+        <button type="button" class="admin-tab-btn" data-tab="tab-pricing">
+          🏷️ Price Updates & Matrix
+        </button>
       </div>
 
-      <div id="statusNotice" class="alert" style="display:none;"></div>
-
-      <div class="table-wrapper">
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th>Ref #</th>
-              <th>Date & Time</th>
-              <th>Hirer Details</th>
-              <th>Room & Event</th>
-              <th>Add-ons</th>
-              <th>Est. Cost</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="bookingsTableBody">
-            <tr>
-              <td colspan="8" style="text-align:center; padding: 2rem;">Loading bookings...</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Pricing Management Card -->
-      <div style="margin-top: 3.5rem;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+      <!-- Tab 1: Bookings Management -->
+      <div id="tab-bookings" class="admin-tab-pane active">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
           <div>
-            <h3>Venue Pricing Configuration</h3>
-            <p style="color:var(--text-muted); font-size:0.9rem;">Adjust hourly rates and add-on hire costs for all public booking calculations.</p>
+            <h2>Booking Requests</h2>
+            <p style="color: var(--text-muted); font-size: 0.9rem;">Review and manage venue inquiries for Claygate Village Hall</p>
           </div>
-          <button id="savePricesBtn" class="btn btn-primary btn-sm">💾 Save Price Changes</button>
+          <div style="display: flex; gap: 0.75rem; align-items: center;">
+            <select id="filterStatus" class="form-control" style="width: auto;">
+              <option value="">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="declined">Declined</option>
+            </select>
+            <button id="refreshBtn" class="btn btn-outline btn-sm">↻ Refresh</button>
+          </div>
         </div>
 
-        <div id="pricingNotice" class="alert" style="display:none;"></div>
+        <div id="statusNotice" class="alert" style="display:none;"></div>
 
         <div class="table-wrapper">
           <table class="admin-table">
             <thead>
               <tr>
-                <th>Item / Facility</th>
-                <th>Category</th>
-                <th>Unit Type</th>
-                <th>Rate (£ GBP)</th>
+                <th>Ref #</th>
+                <th>Date & Time</th>
+                <th>Hirer Details</th>
+                <th>Room & Event</th>
+                <th>Add-ons</th>
+                <th>Est. Cost</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="bookingsTableBody">
+              <tr>
+                <td colspan="8" style="text-align:center; padding: 2rem;">Loading bookings...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab 2: Pricing Matrix & Updates -->
+      <div id="tab-pricing" class="admin-tab-pane">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 1rem;">
+          <div>
+            <h2>Venue Pricing Configuration</h2>
+            <p style="color:var(--text-muted); font-size:0.9rem;">
+              Pricing is keyed by <strong>Facility + Booking Category</strong>. Rates sort automatically by room type.
+            </p>
+          </div>
+          <div style="display:flex; gap:0.5rem;">
+            <button id="toggleAddPriceBtn" class="btn btn-outline btn-sm">➕ Add New Price Rule</button>
+            <button id="savePricesBtn" class="btn btn-primary btn-sm">💾 Save Price Changes</button>
+          </div>
+        </div>
+
+        <div id="pricingNotice" class="alert" style="display:none;"></div>
+
+        <!-- Add New Price Row Card -->
+        <div id="addPriceCard" class="add-price-card" style="display:none;">
+          <h4>➕ Add New Pricing Rule (Facility + Booking Category)</h4>
+          <form id="addPriceForm">
+            <div class="add-price-grid">
+              <div>
+                <label style="font-size:0.8rem; font-weight:700;">Facility / Space *</label>
+                <select id="newPriceRoom" class="form-control" required>
+                  <option value="main_hall">Main Hall</option>
+                  <option value="small_hall">Small Hall</option>
+                  <option value="committee_room">Committee Room</option>
+                  <option value="entire_venue">Entire Complex</option>
+                  <option value="stage_av">Stage & AV System</option>
+                  <option value="kitchen_commercial">Commercial Kitchen</option>
+                  <option value="deposit">Security Deposit</option>
+                </select>
+              </div>
+
+              <div>
+                <label style="font-size:0.8rem; font-weight:700;">Category of Booking *</label>
+                <select id="newPriceCategory" class="form-control" required>
+                  <option value="all">Standard / All Categories</option>
+                  <option value="private_party">Children / Family Party</option>
+                  <option value="wedding_reception">Wedding Reception</option>
+                  <option value="fitness_class">Class / Fitness / Regular</option>
+                  <option value="theatrical_performance">Stage / Drama / Show</option>
+                  <option value="meeting_conference">Meeting / Corporate</option>
+                  <option value="other">Other Community</option>
+                </select>
+              </div>
+
+              <div>
+                <label style="font-size:0.8rem; font-weight:700;">Rule Label Name *</label>
+                <input type="text" id="newPriceName" class="form-control" placeholder="e.g. Main Hall (Wedding)" required>
+              </div>
+
+              <div>
+                <label style="font-size:0.8rem; font-weight:700;">Unit Type *</label>
+                <select id="newPriceUnit" class="form-control" required>
+                  <option value="per_hour">per hour</option>
+                  <option value="per_event">per event</option>
+                  <option value="flat">flat fee</option>
+                </select>
+              </div>
+
+              <div>
+                <label style="font-size:0.8rem; font-weight:700;">Rate (£ GBP) *</label>
+                <input type="number" step="0.50" min="0" id="newPriceRate" class="form-control" placeholder="20.00" required>
+              </div>
+
+              <div>
+                <button type="submit" class="btn btn-secondary btn-sm" style="height:38px;">Add Row</button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <!-- Pricing Table sorted by Room Type -->
+        <div class="table-wrapper">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th style="width: 22%;">Facility / Room Type</th>
+                <th style="width: 25%;">Category of Booking</th>
+                <th style="width: 23%;">Pricing Label</th>
+                <th style="width: 12%;">Unit Type</th>
+                <th style="width: 12%;">Rate (£ GBP)</th>
+                <th style="width: 6%; text-align:center;">Action</th>
               </tr>
             </thead>
             <tbody id="pricingTableBody">
               <tr>
-                <td colspan="4" style="text-align:center; padding: 2rem;">Loading pricing settings...</td>
+                <td colspan="6" style="text-align:center; padding: 2rem;">Loading pricing settings...</td>
               </tr>
             </tbody>
           </table>

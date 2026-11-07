@@ -1,5 +1,17 @@
 // Admin Dashboard Logic: Bookings & Pricing Administration
 let token = sessionStorage.getItem("cvh_admin_token") || "";
+let currentPricingList = [];
+
+// Room sort weight priority
+const ROOM_ORDER = {
+  main_hall: 1,
+  small_hall: 2,
+  committee_room: 3,
+  entire_venue: 4,
+  stage_av: 5,
+  kitchen_commercial: 6,
+  deposit: 7
+};
 
 document.addEventListener("DOMContentLoaded", () => {
   const loginForm = document.getElementById("adminLoginForm");
@@ -9,6 +21,21 @@ document.addEventListener("DOMContentLoaded", () => {
   const refreshBtn = document.getElementById("refreshBtn");
   const filterStatus = document.getElementById("filterStatus");
   const savePricesBtn = document.getElementById("savePricesBtn");
+  const toggleAddPriceBtn = document.getElementById("toggleAddPriceBtn");
+  const addPriceCard = document.getElementById("addPriceCard");
+  const addPriceForm = document.getElementById("addPriceForm");
+
+  // Tab switching
+  const tabBtns = document.querySelectorAll(".admin-tab-btn");
+  tabBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+      tabBtns.forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".admin-tab-pane").forEach(p => p.classList.remove("active"));
+      btn.classList.add("active");
+      const target = document.getElementById(btn.getAttribute("data-tab"));
+      if (target) target.classList.add("active");
+    });
+  });
 
   if (token) {
     showDashboard();
@@ -35,6 +62,64 @@ document.addEventListener("DOMContentLoaded", () => {
   refreshBtn.addEventListener("click", () => { loadBookings(); loadPricing(); });
   filterStatus.addEventListener("change", () => loadBookings());
   savePricesBtn.addEventListener("click", () => savePricing());
+
+  // Toggle add price card
+  if (toggleAddPriceBtn) {
+    toggleAddPriceBtn.addEventListener("click", () => {
+      const isHidden = addPriceCard.style.display === "none";
+      addPriceCard.style.display = isHidden ? "block" : "none";
+      toggleAddPriceBtn.textContent = isHidden ? "✕ Close Add Form" : "➕ Add New Price Rule";
+    });
+  }
+
+  // Handle new price row submission
+  if (addPriceForm) {
+    addPriceForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const room = document.getElementById("newPriceRoom").value;
+      const category = document.getElementById("newPriceCategory").value;
+      const name = document.getElementById("newPriceName").value.trim();
+      const unit = document.getElementById("newPriceUnit").value;
+      const rate = parseFloat(document.getElementById("newPriceRate").value) || 0.0;
+
+      // Unique key: facility + type of booking
+      const key = `${room}_${category}`;
+
+      // Check if rule already exists, update or add
+      const existingIdx = currentPricingList.findIndex(item => item.key === key);
+      const newRule = {
+        key: key,
+        room: room,
+        category: category,
+        name: name || `${formatRoom(room)} (${formatCategory(category)})`,
+        unit: unit,
+        price: rate
+      };
+
+      if (existingIdx >= 0) {
+        currentPricingList[existingIdx] = newRule;
+      } else {
+        currentPricingList.push(newRule);
+      }
+
+      // Always sort by room type
+      sortPricingList(currentPricingList);
+
+      // Re-render table
+      renderPricingTable(currentPricingList);
+
+      // Reset & hide form
+      addPriceForm.reset();
+      addPriceCard.style.display = "none";
+      if (toggleAddPriceBtn) toggleAddPriceBtn.textContent = "➕ Add New Price Rule";
+
+      const notice = document.getElementById("pricingNotice");
+      notice.className = "alert alert-success";
+      notice.textContent = `Rule "${newRule.name}" added! Click "Save Price Changes" to publish.`;
+      notice.style.display = "block";
+      setTimeout(() => { notice.style.display = "none"; }, 3500);
+    });
+  }
 });
 
 async function showDashboard() {
@@ -90,7 +175,7 @@ async function loadBookings() {
         </td>
         <td>
           <span style="font-weight:600;">${formatRoom(b.room)}</span><br>
-          <small>${formatEventType(b.event_type)} (${b.guest_count} guests)</small>
+          <small>${formatCategory(b.event_type)} (${b.guest_count} guests)</small>
         </td>
         <td>
           ${b.requires_stage ? '<span class="badge badge-amber" style="font-size:0.7rem;">Stage</span> ' : ''}
@@ -117,28 +202,102 @@ async function loadBookings() {
   }
 }
 
+// Sort pricing list always by room type order, then category
+function sortPricingList(list) {
+  list.sort((a, b) => {
+    const orderA = ROOM_ORDER[a.room] || 99;
+    const orderB = ROOM_ORDER[b.room] || 99;
+    if (orderA !== orderB) return orderA - orderB;
+    return (a.category || "").localeCompare(b.category || "");
+  });
+}
+
 async function loadPricing() {
   const tbody = document.getElementById("pricingTableBody");
-  tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding: 1.5rem;">Loading pricing settings...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 1.5rem;">Loading pricing settings...</td></tr>`;
 
   try {
     const res = await fetch("/api/pricing");
     const data = await res.json();
-    const list = data.pricing || [];
+    let list = data.pricing || [];
 
-    tbody.innerHTML = list.map(item => `
-      <tr>
-        <td><strong>${escapeHtml(item.name)}</strong></td>
-        <td><span class="badge badge-blue">${escapeHtml(item.category)}</span></td>
-        <td>${escapeHtml(item.unit.replace("_", " "))}</td>
-        <td>
-          £ <input type="number" step="0.50" min="0" class="price-input" data-key="${item.key}" value="${parseFloat(item.price).toFixed(2)}">
-        </td>
-      </tr>
-    `).join("");
+    // Ensure room and category exist on each row
+    list = list.map(item => {
+      let room = item.room;
+      let category = item.category;
+
+      if (!room) {
+        if (item.key.includes("main_hall")) room = "main_hall";
+        else if (item.key.includes("small_hall")) room = "small_hall";
+        else if (item.key.includes("committee_room")) room = "committee_room";
+        else if (item.key.includes("entire_venue")) room = "entire_venue";
+        else if (item.key.includes("stage")) room = "stage_av";
+        else if (item.key.includes("kitchen")) room = "kitchen_commercial";
+        else if (item.key.includes("deposit")) room = "deposit";
+        else room = "other";
+      }
+
+      if (!category || category === "room_rate" || category === "addon" || category === "deposit") {
+        category = "all";
+      }
+
+      return {
+        ...item,
+        room: room,
+        category: category
+      };
+    });
+
+    sortPricingList(list);
+    currentPricingList = list;
+    renderPricingTable(currentPricingList);
+
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--danger); padding:1rem;">Failed to load pricing: ${err.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--danger); padding:1rem;">Failed to load pricing: ${err.message}</td></tr>`;
   }
+}
+
+function renderPricingTable(list) {
+  const tbody = document.getElementById("pricingTableBody");
+
+  if (list.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2rem; color:var(--text-muted);">No pricing rules configured. Click "Add New Price Rule" above.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = list.map((item, idx) => `
+    <tr>
+      <td>
+        <span class="badge ${getRoomBadgeClass(item.room)}" style="font-size:0.78rem;">
+          ${formatRoom(item.room)}
+        </span>
+      </td>
+      <td>
+        <strong>${formatCategory(item.category)}</strong>
+      </td>
+      <td>
+        <span style="font-weight:600; color:#1e293b;">${escapeHtml(item.name)}</span>
+        <br><small style="color:var(--text-muted); font-family:monospace; font-size:0.75rem;">Key: ${escapeHtml(item.key)}</small>
+      </td>
+      <td>
+        ${escapeHtml((item.unit || "per_hour").replace("_", " "))}
+      </td>
+      <td>
+        £ <input type="number" step="0.50" min="0" class="price-input" data-index="${idx}" data-key="${item.key}" value="${parseFloat(item.price).toFixed(2)}">
+      </td>
+      <td style="text-align:center;">
+        <button type="button" class="btn btn-outline btn-sm" style="color:#b91c1c; border-color:#fecaca; padding:0.25rem 0.55rem; font-size:0.75rem;" onclick="removePricingRow(${idx})">✕</button>
+      </td>
+    </tr>
+  `).join("");
+}
+
+function removePricingRow(idx) {
+  const item = currentPricingList[idx];
+  if (!confirm(`Delete price rule "${item.name}"?`)) return;
+  currentPricingList.splice(idx, 1);
+  sortPricingList(currentPricingList);
+  renderPricingTable(currentPricingList);
 }
 
 async function savePricing() {
@@ -146,10 +305,13 @@ async function savePricing() {
   const saveBtn = document.getElementById("savePricesBtn");
   const inputs = document.querySelectorAll(".price-input");
 
-  const prices = Array.from(inputs).map(inp => ({
-    key: inp.getAttribute("data-key"),
-    price: parseFloat(inp.value) || 0.0
-  }));
+  // Update rates from inputs
+  inputs.forEach(inp => {
+    const idx = parseInt(inp.getAttribute("data-index"), 10);
+    if (!isNaN(idx) && currentPricingList[idx]) {
+      currentPricingList[idx].price = parseFloat(inp.value) || 0.0;
+    }
+  });
 
   saveBtn.disabled = true;
   saveBtn.textContent = "Saving...";
@@ -161,13 +323,13 @@ async function savePricing() {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${token}`
       },
-      body: JSON.stringify({ prices })
+      body: JSON.stringify({ pricing: currentPricingList })
     });
 
     const data = await res.json();
     if (res.ok && data.success) {
       notice.className = "alert alert-success";
-      notice.textContent = "Pricing configuration successfully updated! New rates are now active.";
+      notice.textContent = "Pricing configuration successfully updated! All new public inquiries will use these rates.";
       notice.style.display = "block";
       setTimeout(() => { notice.style.display = "none"; }, 4000);
     } else {
@@ -212,21 +374,38 @@ function formatRoom(room) {
     main_hall: "Main Hall",
     small_hall: "Small Hall",
     committee_room: "Committee Room",
-    entire_venue: "Entire Complex"
+    entire_venue: "Entire Complex",
+    stage_av: "Stage & AV System",
+    kitchen_commercial: "Commercial Kitchen",
+    deposit: "Security Deposit"
   };
   return map[room] || room;
 }
 
-function formatEventType(evt) {
+function getRoomBadgeClass(room) {
   const map = {
-    private_party: "Private Party",
-    wedding_reception: "Wedding Reception",
-    fitness_class: "Fitness/Class",
-    theatrical_performance: "Theatrical/Stage",
-    meeting_conference: "Meeting/Conference",
-    other: "Other"
+    main_hall: "badge-main",
+    small_hall: "badge-small",
+    committee_room: "badge-committee",
+    entire_venue: "badge-amber",
+    stage_av: "badge-amber",
+    kitchen_commercial: "badge-committee",
+    deposit: "badge-small"
   };
-  return map[evt] || evt;
+  return map[room] || "badge-blue";
+}
+
+function formatCategory(cat) {
+  const map = {
+    all: "Standard / All Categories",
+    private_party: "Children / Family Party",
+    wedding_reception: "Wedding Reception",
+    fitness_class: "Class / Fitness / Regular",
+    theatrical_performance: "Stage / Drama / Show",
+    meeting_conference: "Meeting / Corporate",
+    other: "Other Community"
+  };
+  return map[cat] || cat;
 }
 
 function escapeHtml(str) {
