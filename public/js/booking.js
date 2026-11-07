@@ -66,6 +66,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const postcodeSearchHint = document.getElementById("postcodeSearchHint");
   const manualAddressToggle = document.getElementById("manualAddressToggle");
   const postcodeLookupRow = document.getElementById("postcodeLookupRow");
+  const addressLookupPrompt = document.getElementById("addressLookupPrompt");
 
   // Email format validation (standard RFC 5322 regex check)
   const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
@@ -292,11 +293,26 @@ document.addEventListener("DOMContentLoaded", async () => {
       addressCity.value = cityTown;
       validatePostcodeField(true);
 
-      setFieldStatus(postcodeSearch, postcodeSearchHint, "success", `✓ Found: ${cityTown} (${formattedPc}). Enter house/street in Line 1.`);
-      if (addressLine1) addressLine1.focus();
+      setFieldStatus(postcodeSearch, postcodeSearchHint, "success", `✓ Found postcode details for ${formattedPc}`);
+
+      if (addressLookupPrompt) {
+        addressLookupPrompt.style.display = "block";
+        addressLookupPrompt.innerHTML = `
+          <strong>✓ Postcode verified:</strong> ${formattedPc} (${cityTown}).<br>
+          <span>Please enter your <strong>house number/name &amp; street</strong> in <em>Address Line 1</em> below.</span>
+        `;
+      }
+
+      if (addressLine1) {
+        addressLine1.focus();
+        addressLine1.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
     } else {
       setFieldStatus(postcodeSearch, postcodeSearchHint, "error", "Postcode not found in UK database. Please fill in your address manually below.");
       addressPostcode.value = formatPostcode(raw);
+      if (addressLookupPrompt) {
+        addressLookupPrompt.style.display = "none";
+      }
     }
   }
 

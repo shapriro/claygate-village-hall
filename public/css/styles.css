@@ -1034,6 +1034,22 @@ nav a.active::after {
   margin-bottom: 1rem;
 }
 
+.address-lookup-banner {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius-sm);
+  color: #166534;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  animation: fadeIn 0.25s ease-in-out;
+}
+
+.address-lookup-banner strong {
+  color: #14532d;
+}
+
 .lookup-input-wrap {
   display: flex;
   gap: 0.5rem;

@@ -80,7 +80,8 @@
                 <input type="text" id="postcode_search" class="form-control uppercase-input" placeholder="e.g. KT10 0PQ" maxlength="8" autocomplete="postal-code">
                 <button type="button" id="btnFindAddress" class="btn btn-secondary btn-sm">Find Address</button>
               </div>
-              <small class="field-hint" id="postcodeSearchHint">Enter a valid UK postcode to auto-fill town/city</small>
+              <small class="field-hint" id="postcodeSearchHint">Enter your postcode to auto-fill town/city and format address</small>
+              <div id="addressLookupPrompt" class="address-lookup-banner" style="display:none;"></div>
             </div>
 
             <!-- Split Address Fields -->
@@ -226,6 +227,6 @@
     </div>
   </footer>
 
-  <script src="/js/booking.js?v=2.3"></script>
+  <script src="/js/booking.js?v=2.4"></script>
 </body>
 </html>
