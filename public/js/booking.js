@@ -46,6 +46,230 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.warn("Using fallback pricing table:", err);
   }
 
+  // Inputs for Phone, Postcode & Address
+  const phoneInput = document.getElementById("phone");
+  const phoneHint = document.getElementById("phoneHint");
+  const addressLine1 = document.getElementById("address_line1");
+  const addressCity = document.getElementById("address_city");
+  const addressPostcode = document.getElementById("address_postcode");
+  const addressHidden = document.getElementById("address");
+  const postcodeHint = document.getElementById("postcodeHint");
+  const postcodeSearch = document.getElementById("postcode_search");
+  const btnFindAddress = document.getElementById("btnFindAddress");
+  const postcodeSearchHint = document.getElementById("postcodeSearchHint");
+  const manualAddressToggle = document.getElementById("manualAddressToggle");
+  const postcodeLookupRow = document.getElementById("postcodeLookupRow");
+
+  // 1. Phone number validation and restriction (digits only, valid length 10-11)
+  if (phoneInput) {
+    phoneInput.addEventListener("input", (e) => {
+      // Allow only digits and spaces/plus initially, but clean to digits
+      const raw = e.target.value;
+      // Strip out anything that is not digit or leading +
+      let cleaned = raw.replace(/[^\d+ ]/g, "");
+      // Replace double spaces
+      cleaned = cleaned.replace(/ +/g, " ");
+      if (e.target.value !== cleaned) {
+        e.target.value = cleaned;
+      }
+      validatePhone();
+    });
+
+    phoneInput.addEventListener("blur", validatePhone);
+  }
+
+  function validatePhone() {
+    const raw = phoneInput.value.trim();
+    // Normalize: remove all spaces, dashes, parentheses
+    let digits = raw.replace(/\D/g, "");
+    
+    // If user typed +44, replace with 0
+    if (raw.startsWith("+44")) {
+      digits = "0" + digits.substring(2);
+    }
+
+    if (!raw) {
+      setFieldStatus(phoneInput, phoneHint, "", "UK telephone number (10–11 digits)");
+      return false;
+    }
+
+    // UK telephone numbers are either 10 digits (some landlines) or 11 digits (standard mobile & landline)
+    // Starting with 01, 02, 03, 07, 08
+    const isValidLength = digits.length >= 10 && digits.length <= 11;
+    const startsWithUK = digits.startsWith("0") || raw.startsWith("+");
+
+    if (isValidLength && startsWithUK) {
+      setFieldStatus(phoneInput, phoneHint, "success", "✓ Valid UK phone number format");
+      return true;
+    } else {
+      let msg = "Invalid UK phone number: ";
+      if (digits.length < 10) msg += `Too short (${digits.length} digits, must be 10 or 11)`;
+      else if (digits.length > 11) msg += `Too long (${digits.length} digits, must be 10 or 11)`;
+      else if (!startsWithUK) msg += "Must start with a UK prefix (e.g. 07 or 01/02)";
+      setFieldStatus(phoneInput, phoneHint, "error", msg);
+      return false;
+    }
+  }
+
+  // 2. Postcode validation (official UK format: e.g. KT10 0PQ, SW1A 1AA, etc.)
+  const UK_POSTCODE_REGEX = /^[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}$/i;
+
+  function formatPostcode(str) {
+    const clean = str.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (clean.length > 3) {
+      return clean.slice(0, -3) + " " + clean.slice(-3);
+    }
+    return clean;
+  }
+
+  if (addressPostcode) {
+    addressPostcode.addEventListener("input", (e) => {
+      // Restrict characters: alphanumeric only
+      let val = e.target.value.toUpperCase().replace(/[^A-Z0-9 ]/g, "");
+      if (val.length > 8) val = val.slice(0, 8);
+      e.target.value = val;
+      validatePostcodeField();
+    });
+
+    addressPostcode.addEventListener("blur", () => {
+      if (addressPostcode.value.trim()) {
+        addressPostcode.value = formatPostcode(addressPostcode.value.trim());
+      }
+      validatePostcodeField();
+    });
+  }
+
+  function validatePostcodeField() {
+    const val = addressPostcode.value.trim();
+    if (!val) {
+      setFieldStatus(addressPostcode, postcodeHint, "", "UK postcode format (e.g. KT10 0PQ)");
+      return false;
+    }
+    const clean = val.replace(/\s+/g, "");
+    if (clean.length >= 5 && clean.length <= 7 && UK_POSTCODE_REGEX.test(val)) {
+      setFieldStatus(addressPostcode, postcodeHint, "success", "✓ Valid UK postcode");
+      return true;
+    } else {
+      setFieldStatus(addressPostcode, postcodeHint, "error", "Invalid postcode format (must match UK standard like KT10 0PQ)");
+      return false;
+    }
+  }
+
+  // 3. Postcode Lookup (Automatic via postcodes.io + Fallback)
+  if (btnFindAddress && postcodeSearch) {
+    btnFindAddress.addEventListener("click", performPostcodeLookup);
+    postcodeSearch.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        performPostcodeLookup();
+      }
+    });
+
+    postcodeSearch.addEventListener("input", (e) => {
+      let val = e.target.value.toUpperCase().replace(/[^A-Z0-9 ]/g, "");
+      if (val.length > 8) val = val.slice(0, 8);
+      e.target.value = val;
+    });
+  }
+
+  async function performPostcodeLookup() {
+    const raw = postcodeSearch.value.trim();
+    if (!raw) {
+      setFieldStatus(postcodeSearch, postcodeSearchHint, "error", "Please enter a postcode to search.");
+      return;
+    }
+
+    const clean = raw.replace(/\s+/g, "");
+    if (!UK_POSTCODE_REGEX.test(raw)) {
+      setFieldStatus(postcodeSearch, postcodeSearchHint, "error", "Invalid UK postcode format (e.g. KT10 0PQ).");
+      return;
+    }
+
+    btnFindAddress.disabled = true;
+    btnFindAddress.textContent = "Searching...";
+    setFieldStatus(postcodeSearch, postcodeSearchHint, "", "Looking up address details...");
+
+    try {
+      const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(clean)}`);
+      const data = await res.json();
+
+      if (res.ok && data.status === 200 && data.result) {
+        const r = data.result;
+        const formattedPc = r.postcode;
+        // Derive Town / City
+        const locality = r.parish || r.admin_ward || "";
+        const district = r.admin_district || "";
+        let cityTown = "";
+        if (locality && district && locality !== district) {
+          cityTown = `${locality}, ${district}`;
+        } else {
+          cityTown = district || locality || r.region || "United Kingdom";
+        }
+
+        addressPostcode.value = formattedPc;
+        addressCity.value = cityTown;
+        validatePostcodeField();
+
+        setFieldStatus(postcodeSearch, postcodeSearchHint, "success", `✓ Found: ${cityTown} (${formattedPc}). Please enter your house number/street below.`);
+        addressLine1.focus();
+      } else {
+        throw new Error(data.error || "Postcode not found in UK database.");
+      }
+    } catch (err) {
+      setFieldStatus(postcodeSearch, postcodeSearchHint, "error", `Lookup note: ${err.message}. You can enter your full address manually below.`);
+      addressPostcode.value = formatPostcode(raw);
+    } finally {
+      btnFindAddress.disabled = false;
+      btnFindAddress.textContent = "Find Address";
+    }
+  }
+
+  // 4. Toggle manual address mode
+  if (manualAddressToggle) {
+    let manualMode = false;
+    manualAddressToggle.addEventListener("click", () => {
+      manualMode = !manualMode;
+      if (manualMode) {
+        postcodeLookupRow.style.display = "none";
+        manualAddressToggle.textContent = "Use Postcode Lookup";
+      } else {
+        postcodeLookupRow.style.display = "block";
+        manualAddressToggle.textContent = "Enter address manually";
+      }
+      addressLine1.focus();
+    });
+  }
+
+  function setFieldStatus(inputEl, hintEl, state, message) {
+    inputEl.classList.remove("is-valid", "is-invalid");
+    hintEl.classList.remove("success", "error");
+    if (state === "valid" || state === "success") {
+      inputEl.classList.add("is-valid");
+      hintEl.classList.add("success");
+    } else if (state === "invalid" || state === "error") {
+      inputEl.classList.add("is-invalid");
+      hintEl.classList.add("error");
+    }
+    hintEl.textContent = message;
+  }
+
+  // Assemble full address for submission and hidden input
+  function updateConsolidatedAddress() {
+    const l1 = addressLine1 ? addressLine1.value.trim() : "";
+    const city = addressCity ? addressCity.value.trim() : "";
+    const pc = addressPostcode ? addressPostcode.value.trim() : "";
+    const parts = [l1, city, pc].filter(Boolean);
+    const full = parts.join(", ");
+    if (addressHidden) {
+      addressHidden.value = full;
+    }
+    return full;
+  }
+
+  [addressLine1, addressCity, addressPostcode].forEach(el => {
+    if (el) el.addEventListener("input", updateConsolidatedAddress);
+  });
+
   // Minimum date is today
   if (dateInput) {
     const today = new Date().toISOString().split("T")[0];
@@ -209,12 +433,44 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.preventDefault();
     clearError();
 
+    // Validate phone number
+    if (!validatePhone()) {
+      showError("Please enter a valid UK phone number (10 or 11 digits, numbers only).");
+      phoneInput.focus();
+      return;
+    }
+
+    // Validate postcode
+    if (!validatePostcodeField()) {
+      showError("Please enter a valid UK postcode (e.g. KT10 0PQ).");
+      addressPostcode.focus();
+      return;
+    }
+
+    // Validate address line 1 & city
+    if (!addressLine1.value.trim()) {
+      showError("Please enter your Address Line 1.");
+      addressLine1.focus();
+      return;
+    }
+
+    if (!addressCity.value.trim()) {
+      showError("Please enter your Town or City.");
+      addressCity.focus();
+      return;
+    }
+
+    const consolidatedAddr = updateConsolidatedAddress();
+
     const payload = {
       full_name: document.getElementById("full_name").value.trim(),
       organization: document.getElementById("organization").value.trim(),
       email: document.getElementById("email").value.trim(),
-      phone: document.getElementById("phone").value.trim(),
-      address: document.getElementById("address").value.trim(),
+      phone: phoneInput.value.trim(),
+      address: consolidatedAddr,
+      address_line1: addressLine1.value.trim(),
+      address_city: addressCity.value.trim(),
+      address_postcode: addressPostcode.value.trim(),
       room: document.getElementById("room").value,
       event_type: document.getElementById("event_type").value,
       event_date: document.getElementById("event_date").value,

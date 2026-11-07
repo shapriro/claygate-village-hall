@@ -62,12 +62,47 @@
 
           <div class="form-group">
             <label for="phone">Contact Telephone *</label>
-            <input type="tel" id="phone" name="phone" class="form-control" placeholder="07123 456789" required>
+            <input type="tel" id="phone" name="phone" class="form-control" placeholder="07123 456789" required inputmode="numeric" autocomplete="tel">
+            <small class="field-hint" id="phoneHint">UK telephone number (10–11 digits)</small>
           </div>
 
-          <div class="form-group form-full">
-            <label for="address">Address (Billing / Contact)</label>
-            <input type="text" id="address" name="address" class="form-control" placeholder="e.g. 4 Gordon Road, Claygate, Esher, KT10 0PQ">
+          <!-- Address Section (Lookup + Split fields) -->
+          <div class="form-group form-full address-section-box">
+            <div class="address-header-row">
+              <label class="section-sublabel">Contact / Billing Address *</label>
+              <button type="button" id="manualAddressToggle" class="btn-link-toggle">Enter address manually</button>
+            </div>
+
+            <!-- Postcode lookup row -->
+            <div id="postcodeLookupRow" class="postcode-lookup-bar">
+              <div class="lookup-input-wrap">
+                <input type="text" id="postcode_search" class="form-control uppercase-input" placeholder="e.g. KT10 0PQ" maxlength="8" autocomplete="postal-code">
+                <button type="button" id="btnFindAddress" class="btn btn-secondary btn-sm">Find Address</button>
+              </div>
+              <small class="field-hint" id="postcodeSearchHint">Enter a valid UK postcode to auto-fill town/city</small>
+            </div>
+
+            <!-- Split Address Fields -->
+            <div id="splitAddressFields" class="split-address-grid">
+              <div class="form-group form-full">
+                <label for="address_line1">Address Line 1 *</label>
+                <input type="text" id="address_line1" name="address_line1" class="form-control" placeholder="House name/number and street, e.g. 4 Gordon Road" required autocomplete="address-line1">
+              </div>
+
+              <div class="form-group">
+                <label for="address_city">Town / City *</label>
+                <input type="text" id="address_city" name="address_city" class="form-control" placeholder="e.g. Claygate, Esher" required autocomplete="address-level2">
+              </div>
+
+              <div class="form-group">
+                <label for="address_postcode">Postcode *</label>
+                <input type="text" id="address_postcode" name="address_postcode" class="form-control uppercase-input" placeholder="e.g. KT10 0PQ" required maxlength="8" autocomplete="postal-code">
+                <small class="field-hint" id="postcodeHint">UK postcode format (e.g. KT10 0PQ)</small>
+              </div>
+            </div>
+
+            <!-- Hidden consolidated address input for backend compatibility -->
+            <input type="hidden" id="address" name="address">
           </div>
 
           <!-- Event Details -->

@@ -958,6 +958,99 @@ nav a.active::after {
   margin: 0 auto;
 }
 
+.field-hint {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.3rem;
+}
+
+.field-hint.error {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.field-hint.success {
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.form-control.is-invalid {
+  border-color: #dc2626;
+  background-color: #fef2f2;
+}
+
+.form-control.is-valid {
+  border-color: #16a34a;
+}
+
+.uppercase-input {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: monospace;
+}
+
+/* Address Box & Lookup */
+.address-section-box {
+  background: #f8fafc;
+  padding: 1.25rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  margin-bottom: 1.25rem;
+}
+
+.address-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.section-sublabel {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--primary-dark);
+  margin: 0;
+}
+
+.btn-link-toggle {
+  background: none;
+  border: none;
+  color: var(--primary-light);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.btn-link-toggle:hover {
+  color: var(--primary);
+}
+
+.postcode-lookup-bar {
+  margin-bottom: 1rem;
+}
+
+.lookup-input-wrap {
+  display: flex;
+  gap: 0.5rem;
+  max-width: 380px;
+}
+
+.lookup-input-wrap input {
+  flex: 1;
+}
+
+.split-address-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+  margin-top: 0.5rem;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
