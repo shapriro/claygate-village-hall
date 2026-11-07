@@ -315,26 +315,30 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function renderSlots() {
     slotsGrid.innerHTML = "";
-    const hours = [
-      "08:00", "09:00", "10:00", "11:00", "12:00", "13:00",
-      "14:00", "15:00", "16:00", "17:00", "18:00", "19:00",
-      "20:00", "21:00", "22:00"
-    ];
+    // 30-minute intervals from 08:00 to 22:30
+    const halfHourSlots = [];
+    for (let h = 8; h <= 22; h++) {
+      const hh = h.toString().padStart(2, "0");
+      halfHourSlots.push(`${hh}:00`);
+      halfHourSlots.push(`${hh}:30`);
+    }
 
-    hours.forEach(hour => {
-      const busyItem = getBusyConflict(hour);
+    halfHourSlots.forEach(slotTime => {
+      const busyItem = getBusyConflict(slotTime);
       const isBooked = !!busyItem;
       const slot = document.createElement("div");
       slot.className = `time-slot ${isBooked ? "slot-busy" : "slot-available"}`;
       
       const label = isBooked ? (busyItem.title || busyItem.reason || "Booked") : "Open";
-      slot.innerHTML = `<span>${hour}</span><br><small style="font-size:0.65rem; display:block; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${label}">${isBooked ? "Booked" : "Open"}</small>`;
+      slot.innerHTML = `<span>${slotTime}</span><br><small style="font-size:0.65rem; display:block; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${label}">${isBooked ? "Booked" : "Open"}</small>`;
 
       if (!isBooked) {
         slot.style.cursor = "pointer";
-        slot.title = `Click to choose ${hour} as start time`;
+        slot.title = `Click to choose ${slotTime} as start time`;
         slot.addEventListener("click", () => {
-          startTimeInput.value = hour;
+          startTimeInput.value = slotTime;
+          // Auto suggest default 2-hour or 1-hour end time if empty or invalid
+          adjustSuggestedEndTime(slotTime);
           validateChosenTimes();
           calculateCost();
         });
@@ -348,26 +352,128 @@ document.addEventListener("DOMContentLoaded", async () => {
     return bookedSlots.find(b => time >= b.start_time && time < b.end_time);
   }
 
+  function snapToHalfHour(val) {
+    if (!val) return "";
+    const parts = val.split(":");
+    let h = parseInt(parts[0], 10);
+    let m = parseInt(parts[1], 10);
+    if (isNaN(h) || isNaN(m)) return val;
+    // Snap minutes: 0-14 -> 00, 15-44 -> 30, 45-59 -> next hour 00
+    if (m < 15) {
+      m = 0;
+    } else if (m < 45) {
+      m = 30;
+    } else {
+      m = 0;
+      h = Math.min(23, h + 1);
+    }
+    return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+  }
+
+  function adjustSuggestedEndTime(startVal) {
+    if (!startVal) return;
+    const parts = startVal.split(":").map(Number);
+    let endH = parts[0] + 2; // Default 2-hour hire
+    let endM = parts[1];
+    if (endH >= 24) {
+      endH = 23;
+      endM = 30;
+    }
+    const suggested = `${endH.toString().padStart(2, "0")}:${endM.toString().padStart(2, "0")}`;
+    if (!endTimeInput.value || endTimeInput.value <= startVal) {
+      endTimeInput.value = suggested;
+    }
+  }
+
+  // Snap inputs on change/blur
+  startTimeInput.addEventListener("change", () => {
+    if (startTimeInput.value) {
+      startTimeInput.value = snapToHalfHour(startTimeInput.value);
+    }
+    validateChosenTimes();
+    calculateCost();
+  });
+
+  endTimeInput.addEventListener("change", () => {
+    if (endTimeInput.value) {
+      endTimeInput.value = snapToHalfHour(endTimeInput.value);
+    }
+    validateChosenTimes();
+    calculateCost();
+  });
+
   function validateChosenTimes() {
     const s = startTimeInput.value;
     const e = endTimeInput.value;
 
-    if (!s || !e) return;
+    const startTimeHint = document.getElementById("startTimeHint");
+    const endTimeHint = document.getElementById("endTimeHint");
 
-    if (s >= e) {
-      showError("End time must be later than start time.");
-      submitBtn.disabled = true;
-      return;
+    if (startTimeHint) startTimeHint.classList.remove("error", "success");
+    if (endTimeHint) endTimeHint.classList.remove("error", "success");
+    startTimeInput.classList.remove("is-invalid");
+    endTimeInput.classList.remove("is-invalid");
+
+    if (!s && !e) return true;
+
+    // Check 30-min increments
+    if (s) {
+      const sMin = parseInt(s.split(":")[1], 10);
+      if (sMin !== 0 && sMin !== 30) {
+        showError("Start time must be in 30-minute intervals (:00 or :30).");
+        startTimeInput.classList.add("is-invalid");
+        if (startTimeHint) {
+          startTimeHint.textContent = "Please select :00 or :30 minutes.";
+          startTimeHint.classList.add("error");
+        }
+        submitBtn.disabled = true;
+        return false;
+      }
     }
 
+    if (e) {
+      const eMin = parseInt(e.split(":")[1], 10);
+      if (eMin !== 0 && eMin !== 30) {
+        showError("End time must be in 30-minute intervals (:00 or :30).");
+        endTimeInput.classList.add("is-invalid");
+        if (endTimeHint) {
+          endTimeHint.textContent = "Please select :00 or :30 minutes.";
+          endTimeHint.classList.add("error");
+        }
+        submitBtn.disabled = true;
+        return false;
+      }
+    }
+
+    if (!s || !e) return true;
+
+    // Rule 1: For the same day bookings, end time must be strictly greater than start time
+    if (s >= e) {
+      showError(`End time (${e}) must be greater than start time (${s}).`);
+      endTimeInput.classList.add("is-invalid");
+      if (endTimeHint) {
+        endTimeHint.textContent = `End time must be after ${s}.`;
+        endTimeHint.classList.add("error");
+      }
+      submitBtn.disabled = true;
+      return false;
+    }
+
+    // Check collision against live bookings
     const collision = bookedSlots.find(b => s < b.end_time && e > b.start_time);
     if (collision) {
       const reason = collision.title || collision.reason || "an existing booking";
       showError(`The selected time period (${s} - ${e}) clashes with ${reason} (${collision.start_time} - ${collision.end_time}). Please adjust your times.`);
       submitBtn.disabled = true;
+      return false;
     } else {
       clearError();
       submitBtn.disabled = false;
+      if (endTimeHint) {
+        endTimeHint.textContent = "✓ Valid booking time range.";
+        endTimeHint.classList.add("success");
+      }
+      return true;
     }
   }
 
@@ -457,6 +563,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!addressCity.value.trim()) {
       showError("Please enter your Town or City.");
       addressCity.focus();
+      return;
+    }
+
+    // Validate times (end time > start time and 30-min intervals)
+    if (!validateChosenTimes()) {
       return;
     }
 
