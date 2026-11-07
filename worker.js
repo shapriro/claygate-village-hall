@@ -29,6 +29,10 @@ const HALLMASTER_ROOMS = {
   entire_venue: "0"
 };
 
+// In-memory runtime state for submitted bookings and custom pricing matrix
+let bookingsStore = [];
+let nextBookingId = 1;
+
 async function handleBookingsApi(request, url, env) {
   // AVAILABILITY CHECK
   if (url.searchParams.get("availability") === "1") {
@@ -46,6 +50,7 @@ async function handleBookingsApi(request, url, env) {
 
     const busySlots = [];
 
+    // 1. Fetch from live Hallmaster schedule
     try {
       const hmUrl = `https://v2.hallmaster.co.uk/api/Scheduler/GetBookings?start=${rangeStart}&end=${rangeEnd}&roomId=${hmRoomId}&custView=false&HallId=${HALLMASTER_VENUE_ID}&groupRooms=false`;
       const hmRes = await fetch(hmUrl, {
@@ -78,18 +83,93 @@ async function handleBookingsApi(request, url, env) {
       console.error("Hallmaster fetch error:", err);
     }
 
+    // 2. Also include confirmed submissions from our booking portal
+    bookingsStore
+      .filter(b => b.status === "confirmed" && (b.room === room || room === "entire_venue" || b.room === "entire_venue"))
+      .forEach(b => {
+        busySlots.push({
+          start_date: b.event_date,
+          start_time: b.start_time,
+          end_time: b.end_time,
+          status: "confirmed",
+          title: b.organization || b.full_name || "Online Reservation",
+          room_id: hmRoomId,
+          source: "portal"
+        });
+      });
+
     return jsonResponse({ bookedSlots: busySlots });
   }
 
-  // POST: Create booking
+  // GET: Retrieve bookings for Admin Portal
+  if (request.method === "GET") {
+    const statusFilter = url.searchParams.get("status");
+    let results = [...bookingsStore];
+    if (statusFilter) {
+      results = results.filter(b => b.status.toLowerCase() === statusFilter.toLowerCase());
+    }
+    // Most recent first
+    results.sort((a, b) => (b.id || 0) - (a.id || 0));
+    return jsonResponse({ bookings: results });
+  }
+
+  // POST: Create booking from public booking form
   if (request.method === "POST") {
-    const data = await request.json();
-    const refCode = "CVH-" + Math.random().toString(36).substring(2, 8).toUpperCase();
-    return jsonResponse({
-      success: true,
-      reference_code: refCode,
-      message: "Booking received"
-    }, 201);
+    try {
+      const data = await request.json();
+      const refCode = "CVH-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+      
+      const newBooking = {
+        id: nextBookingId++,
+        reference_code: refCode,
+        full_name: data.full_name || "",
+        organization: data.organization || "",
+        email: data.email || "",
+        phone: data.phone || "",
+        address: data.address || "",
+        address_line1: data.address_line1 || "",
+        address_city: data.address_city || "",
+        address_postcode: data.address_postcode || "",
+        room: data.room || "main_hall",
+        event_type: data.event_type || "other",
+        event_date: data.event_date || "",
+        start_time: data.start_time || "",
+        end_time: data.end_time || "",
+        guest_count: parseInt(data.guest_count, 10) || 0,
+        requires_stage: !!data.requires_stage,
+        requires_kitchen: !!data.requires_kitchen,
+        special_requirements: data.special_requirements || "",
+        estimated_cost: parseFloat(data.estimated_cost) || 0.0,
+        status: "pending",
+        created_at: new Date().toISOString()
+      };
+
+      bookingsStore.push(newBooking);
+
+      return jsonResponse({
+        success: true,
+        reference_code: refCode,
+        booking: newBooking,
+        message: "Booking received and saved to admin dashboard"
+      }, 201);
+    } catch (err) {
+      return jsonResponse({ error: "Failed to parse booking: " + err.message }, 400);
+    }
+  }
+
+  // PATCH: Update booking status (confirm/decline) from Admin Portal
+  if (request.method === "PATCH") {
+    try {
+      const { id, status } = await request.json();
+      const booking = bookingsStore.find(b => b.id === Number(id));
+      if (!booking) {
+        return jsonResponse({ error: "Booking not found" }, 404);
+      }
+      booking.status = status;
+      return jsonResponse({ success: true, booking });
+    } catch (err) {
+      return jsonResponse({ error: "Failed to update booking: " + err.message }, 400);
+    }
   }
 
   return jsonResponse({ error: "Method not allowed" }, 405);

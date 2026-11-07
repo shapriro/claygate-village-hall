@@ -157,48 +157,71 @@ async function loadBookings() {
 
     const bookings = data.bookings || [];
     if (bookings.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 2rem; color: var(--text-muted);">No booking requests found.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding: 2.5rem; color: var(--text-muted);">No booking requests found. New submissions from the booking form will appear here automatically.</td></tr>`;
       return;
     }
 
-    tbody.innerHTML = bookings.map(b => `
+    tbody.innerHTML = bookings.map(b => {
+      // Build address presentation
+      let addrText = b.address || "";
+      if (!addrText && (b.address_line1 || b.address_city || b.address_postcode)) {
+        addrText = [b.address_line1, b.address_city, b.address_postcode].filter(Boolean).join(", ");
+      }
+
+      return `
       <tr>
-        <td><strong>${escapeHtml(b.reference_code)}</strong></td>
         <td>
-          <strong>${escapeHtml(b.event_date)}</strong><br>
-          <small style="color:var(--text-muted);">${escapeHtml(b.start_time)} - ${escapeHtml(b.end_time)}</small>
+          <strong style="color:var(--primary); font-family:monospace; font-size:0.95rem;">${escapeHtml(b.reference_code)}</strong>
+          <br><small style="color:var(--text-muted); font-size:0.75rem;">${b.created_at ? new Date(b.created_at).toLocaleDateString("en-GB") : ""}</small>
         </td>
         <td>
-          <strong>${escapeHtml(b.full_name)}</strong><br>
-          <small>${escapeHtml(b.email)} | ${escapeHtml(b.phone)}</small>
-          ${b.organization ? `<br><small style="color:var(--text-muted);">Org: ${escapeHtml(b.organization)}</small>` : ""}
+          <strong style="white-space:nowrap;">${escapeHtml(b.event_date)}</strong><br>
+          <small style="color:var(--text-muted); font-weight:600; white-space:nowrap;">${escapeHtml(b.start_time)} - ${escapeHtml(b.end_time)}</small>
         </td>
         <td>
-          <span style="font-weight:600;">${formatRoom(b.room)}</span><br>
-          <small>${formatCategory(b.event_type)} (${b.guest_count} guests)</small>
+          <strong>${escapeHtml(b.full_name)}</strong>
+          ${b.organization ? `<br><small style="color:#0369a1; font-weight:600;">Org: ${escapeHtml(b.organization)}</small>` : ""}
+        </td>
+        <td style="max-width: 220px; font-size:0.85rem;">
+          <div><a href="mailto:${escapeHtml(b.email)}" style="color:var(--primary);">${escapeHtml(b.email)}</a></div>
+          <div><a href="tel:${escapeHtml(b.phone)}" style="color:#334155; font-weight:600;">${escapeHtml(b.phone)}</a></div>
+          ${addrText ? `<small style="color:var(--text-muted); display:block; margin-top:2px;">📍 ${escapeHtml(addrText)}</small>` : ""}
         </td>
         <td>
-          ${b.requires_stage ? '<span class="badge badge-amber" style="font-size:0.7rem;">Stage</span> ' : ''}
+          <span class="badge ${getRoomBadgeClass(b.room)}" style="font-size:0.75rem; margin-bottom:0.25rem;">
+            ${formatRoom(b.room)}
+          </span>
+          <br><strong style="font-size:0.85rem; color:#1e293b;">${formatCategory(b.event_type)}</strong>
+        </td>
+        <td style="text-align:center; font-weight:600;">
+          ${b.guest_count || "-"}
+        </td>
+        <td>
+          ${b.requires_stage ? '<span class="badge badge-amber" style="font-size:0.7rem;">Stage</span><br>' : ''}
           ${b.requires_kitchen ? '<span class="badge badge-green" style="font-size:0.7rem;">Kitchen</span>' : ''}
           ${!b.requires_stage && !b.requires_kitchen ? '<small style="color:var(--text-muted);">None</small>' : ''}
         </td>
+        <td style="max-width: 200px; font-size:0.82rem; color:#475569;">
+          ${b.special_requirements ? escapeHtml(b.special_requirements) : '<span style="color:#94a3b8;">None</span>'}
+        </td>
         <td>
-          <strong style="color:#166534;">£${(parseFloat(b.estimated_cost) || 0.0).toFixed(2)}</strong>
+          <strong style="color:#166534; font-size:1.05rem;">£${(parseFloat(b.estimated_cost) || 0.0).toFixed(2)}</strong>
         </td>
         <td>
           <span class="status-tag status-${b.status.toLowerCase()}">${escapeHtml(b.status)}</span>
         </td>
         <td>
-          <div style="display:flex; gap:0.35rem;">
-            ${b.status !== 'confirmed' ? `<button class="btn btn-sm btn-primary" onclick="updateStatus(${b.id}, 'confirmed')">Confirm</button>` : ''}
-            ${b.status !== 'declined' ? `<button class="btn btn-sm btn-outline" onclick="updateStatus(${b.id}, 'declined')">Decline</button>` : ''}
+          <div style="display:flex; flex-direction:column; gap:0.3rem;">
+            ${b.status !== 'confirmed' ? `<button class="btn btn-sm btn-primary" style="padding:0.25rem 0.6rem; font-size:0.78rem;" onclick="updateStatus(${b.id}, 'confirmed')">Confirm</button>` : ''}
+            ${b.status !== 'declined' ? `<button class="btn btn-sm btn-outline" style="padding:0.25rem 0.6rem; font-size:0.78rem;" onclick="updateStatus(${b.id}, 'declined')">Decline</button>` : ''}
           </div>
         </td>
       </tr>
-    `).join("");
+      `;
+    }).join("");
 
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 2rem; color: var(--danger);">${err.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding: 2rem; color: var(--danger);">${err.message}</td></tr>`;
   }
 }
 
