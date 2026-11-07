@@ -50,8 +50,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   } catch (err) {
     console.warn("Using fallback pricing table:", err);
   }
-    console.warn("Using fallback pricing table:", err);
-  }
 
   // Inputs for Email, Phone, Postcode & Address
   const emailInput = document.getElementById("email");
