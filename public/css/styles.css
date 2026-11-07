@@ -201,7 +201,7 @@ nav a.active::after {
 /* Hero Section with Glass Card */
 .hero {
   position: relative;
-  background: linear-gradient(rgba(15, 23, 42, 0.65), rgba(15, 23, 42, 0.8)), url('/assets/images/exterior_front.jpg') center/cover no-repeat;
+  background: linear-gradient(rgba(15, 23, 42, 0.65), rgba(15, 23, 42, 0.8)), url('/assets/images/homepage_hero_hall.jpg') center/cover no-repeat;
   color: white;
   padding: 6.5rem 1.5rem 5.5rem;
   text-align: center;
