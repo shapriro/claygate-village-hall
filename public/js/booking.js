@@ -53,7 +53,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.warn("Using fallback pricing table:", err);
   }
 
-  // Inputs for Phone, Postcode & Address
+  // Inputs for Email, Phone, Postcode & Address
+  const emailInput = document.getElementById("email");
+  const emailHint = document.getElementById("emailHint");
   const phoneInput = document.getElementById("phone");
   const phoneHint = document.getElementById("phoneHint");
   const addressLine1 = document.getElementById("address_line1");
@@ -67,52 +69,100 @@ document.addEventListener("DOMContentLoaded", async () => {
   const manualAddressToggle = document.getElementById("manualAddressToggle");
   const postcodeLookupRow = document.getElementById("postcodeLookupRow");
 
+  // Email format validation (standard RFC 5322 regex check)
+  const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+
+  if (emailInput) {
+    emailInput.addEventListener("input", () => {
+      // Clean leading/trailing spaces or tabs on typing
+      if (emailInput.value.includes(" ")) {
+        emailInput.value = emailInput.value.replace(/\s+/g, "");
+      }
+      validateEmailField(false);
+    });
+    emailInput.addEventListener("blur", () => {
+      emailInput.value = emailInput.value.trim().toLowerCase();
+      validateEmailField(true);
+    });
+  }
+
+  function validateEmailField(showErrorOnEmpty = false) {
+    if (!emailInput) return true;
+    const val = emailInput.value.trim();
+    if (!val) {
+      if (showErrorOnEmpty) {
+        setFieldStatus(emailInput, emailHint, "error", "Email address is required.");
+        return false;
+      } else {
+        setFieldStatus(emailInput, emailHint, "", "Enter your valid email address (e.g. name@domain.com)");
+        return false;
+      }
+    }
+    if (EMAIL_REGEX.test(val)) {
+      setFieldStatus(emailInput, emailHint, "success", "✓ Valid email address format");
+      return true;
+    } else {
+      setFieldStatus(emailInput, emailHint, "error", "Please enter a valid email address (e.g. name@domain.com)");
+      return false;
+    }
+  }
+
   // 1. Phone number validation and restriction (digits only, valid length 10-11)
   if (phoneInput) {
     phoneInput.addEventListener("input", (e) => {
-      // Allow only digits and spaces/plus initially, but clean to digits
-      const raw = e.target.value;
-      // Strip out anything that is not digit or leading +
-      let cleaned = raw.replace(/[^\d+ ]/g, "");
-      // Replace double spaces
-      cleaned = cleaned.replace(/ +/g, " ");
-      if (e.target.value !== cleaned) {
-        e.target.value = cleaned;
+      // Allow only digits and optional leading +
+      let val = e.target.value;
+      // Keep leading +, then strip any non-digit
+      let hasLeadingPlus = val.startsWith("+");
+      let digitsOnly = val.replace(/\D/g, "");
+      
+      // Limit to standard max UK digits (11 standard or 12/13 with country code)
+      if (hasLeadingPlus) {
+        if (digitsOnly.length > 13) digitsOnly = digitsOnly.slice(0, 13);
+        e.target.value = "+" + digitsOnly;
+      } else {
+        if (digitsOnly.length > 11) digitsOnly = digitsOnly.slice(0, 11);
+        e.target.value = digitsOnly;
       }
-      validatePhone();
+      validatePhone(false);
     });
 
-    phoneInput.addEventListener("blur", validatePhone);
+    phoneInput.addEventListener("blur", () => {
+      validatePhone(true);
+    });
   }
 
-  function validatePhone() {
+  function validatePhone(showErrorOnEmpty = false) {
+    if (!phoneInput) return true;
     const raw = phoneInput.value.trim();
-    // Normalize: remove all spaces, dashes, parentheses
     let digits = raw.replace(/\D/g, "");
     
-    // If user typed +44, replace with 0
+    // Normalize UK international format +44
     if (raw.startsWith("+44")) {
       digits = "0" + digits.substring(2);
     }
 
     if (!raw) {
-      setFieldStatus(phoneInput, phoneHint, "", "UK telephone number (10–11 digits)");
-      return false;
+      if (showErrorOnEmpty) {
+        setFieldStatus(phoneInput, phoneHint, "error", "Contact phone number is required.");
+        return false;
+      } else {
+        setFieldStatus(phoneInput, phoneHint, "", "Numbers only • 10–11 UK digits (e.g. 07772 278392)");
+        return false;
+      }
     }
 
-    // UK telephone numbers are either 10 digits (some landlines) or 11 digits (standard mobile & landline)
-    // Starting with 01, 02, 03, 07, 08
     const isValidLength = digits.length >= 10 && digits.length <= 11;
     const startsWithUK = digits.startsWith("0") || raw.startsWith("+");
 
     if (isValidLength && startsWithUK) {
-      setFieldStatus(phoneInput, phoneHint, "success", "✓ Valid UK phone number format");
+      setFieldStatus(phoneInput, phoneHint, "success", `✓ Valid UK telephone number (${digits.length} digits)`);
       return true;
     } else {
       let msg = "Invalid UK phone number: ";
-      if (digits.length < 10) msg += `Too short (${digits.length} digits, must be 10 or 11)`;
-      else if (digits.length > 11) msg += `Too long (${digits.length} digits, must be 10 or 11)`;
-      else if (!startsWithUK) msg += "Must start with a UK prefix (e.g. 07 or 01/02)";
+      if (digits.length < 10) msg += `Too short (${digits.length}/10-11 digits required)`;
+      else if (digits.length > 11) msg += `Too long (${digits.length}/11 digits max)`;
+      else if (!startsWithUK) msg += "Must start with 0 (e.g. 07, 01, 02) or +44";
       setFieldStatus(phoneInput, phoneHint, "error", msg);
       return false;
     }
@@ -131,30 +181,36 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   if (addressPostcode) {
     addressPostcode.addEventListener("input", (e) => {
-      // Restrict characters: alphanumeric only
+      // Strict alphanumeric only, uppercase, max 8 chars
       let val = e.target.value.toUpperCase().replace(/[^A-Z0-9 ]/g, "");
       if (val.length > 8) val = val.slice(0, 8);
       e.target.value = val;
-      validatePostcodeField();
+      validatePostcodeField(false);
     });
 
     addressPostcode.addEventListener("blur", () => {
       if (addressPostcode.value.trim()) {
         addressPostcode.value = formatPostcode(addressPostcode.value.trim());
       }
-      validatePostcodeField();
+      validatePostcodeField(true);
     });
   }
 
-  function validatePostcodeField() {
+  function validatePostcodeField(showErrorOnEmpty = false) {
+    if (!addressPostcode) return true;
     const val = addressPostcode.value.trim();
     if (!val) {
-      setFieldStatus(addressPostcode, postcodeHint, "", "UK postcode format (e.g. KT10 0PQ)");
-      return false;
+      if (showErrorOnEmpty) {
+        setFieldStatus(addressPostcode, postcodeHint, "error", "Postcode is required.");
+        return false;
+      } else {
+        setFieldStatus(addressPostcode, postcodeHint, "", "UK postcode format (e.g. KT10 0PQ)");
+        return false;
+      }
     }
     const clean = val.replace(/\s+/g, "");
-    if (clean.length >= 5 && clean.length <= 7 && UK_POSTCODE_REGEX.test(val)) {
-      setFieldStatus(addressPostcode, postcodeHint, "success", "✓ Valid UK postcode");
+    if (clean.length >= 5 && clean.length <= 8 && UK_POSTCODE_REGEX.test(val)) {
+      setFieldStatus(addressPostcode, postcodeHint, "success", `✓ Valid UK postcode (${val})`);
       return true;
     } else {
       setFieldStatus(addressPostcode, postcodeHint, "error", "Invalid postcode format (must match UK standard like KT10 0PQ)");
@@ -162,7 +218,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // 3. Postcode Lookup (Automatic via postcodes.io + Fallback)
+  // 3. Postcode Lookup (Local Worker Proxy + Direct fallback)
   if (btnFindAddress && postcodeSearch) {
     btnFindAddress.addEventListener("click", performPostcodeLookup);
     postcodeSearch.addEventListener("keydown", (e) => {
@@ -196,38 +252,53 @@ document.addEventListener("DOMContentLoaded", async () => {
     btnFindAddress.textContent = "Searching...";
     setFieldStatus(postcodeSearch, postcodeSearchHint, "", "Looking up address details...");
 
+    let lookupData = null;
+
+    // Try local Worker proxy first (bypasses browser adblockers/CORS), fallback to direct API
     try {
-      const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(clean)}`);
-      const data = await res.json();
-
-      if (res.ok && data.status === 200 && data.result) {
-        const r = data.result;
-        const formattedPc = r.postcode;
-        // Derive Town / City
-        const locality = r.parish || r.admin_ward || "";
-        const district = r.admin_district || "";
-        let cityTown = "";
-        if (locality && district && locality !== district) {
-          cityTown = `${locality}, ${district}`;
-        } else {
-          cityTown = district || locality || r.region || "United Kingdom";
-        }
-
-        addressPostcode.value = formattedPc;
-        addressCity.value = cityTown;
-        validatePostcodeField();
-
-        setFieldStatus(postcodeSearch, postcodeSearchHint, "success", `✓ Found: ${cityTown} (${formattedPc}). Please enter your house number/street below.`);
-        addressLine1.focus();
-      } else {
-        throw new Error(data.error || "Postcode not found in UK database.");
+      const res = await fetch(`/api/postcode/${encodeURIComponent(clean)}`);
+      if (res.ok) {
+        lookupData = await res.json();
       }
-    } catch (err) {
-      setFieldStatus(postcodeSearch, postcodeSearchHint, "error", `Lookup note: ${err.message}. You can enter your full address manually below.`);
+    } catch {
+      // Worker proxy fetch failed, try direct
+    }
+
+    if (!lookupData || lookupData.status !== 200 || !lookupData.result) {
+      try {
+        const directRes = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(clean)}`);
+        if (directRes.ok) {
+          lookupData = await directRes.json();
+        }
+      } catch (err) {
+        // Direct also failed
+      }
+    }
+
+    btnFindAddress.disabled = false;
+    btnFindAddress.textContent = "Find Address";
+
+    if (lookupData && (lookupData.status === 200 || lookupData.result)) {
+      const r = lookupData.result;
+      const formattedPc = r.postcode || formatPostcode(clean);
+      const locality = r.parish || r.admin_ward || "";
+      const district = r.admin_district || "";
+      let cityTown = "";
+      if (locality && district && locality !== district) {
+        cityTown = `${locality}, ${district}`;
+      } else {
+        cityTown = district || locality || r.region || "United Kingdom";
+      }
+
+      addressPostcode.value = formattedPc;
+      addressCity.value = cityTown;
+      validatePostcodeField(true);
+
+      setFieldStatus(postcodeSearch, postcodeSearchHint, "success", `✓ Found: ${cityTown} (${formattedPc}). Enter house/street in Line 1.`);
+      if (addressLine1) addressLine1.focus();
+    } else {
+      setFieldStatus(postcodeSearch, postcodeSearchHint, "error", "Postcode not found in UK database. Please fill in your address manually below.");
       addressPostcode.value = formatPostcode(raw);
-    } finally {
-      btnFindAddress.disabled = false;
-      btnFindAddress.textContent = "Find Address";
     }
   }
 
@@ -580,15 +651,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.preventDefault();
     clearError();
 
+    // Validate email address
+    if (!validateEmailField(true)) {
+      showError("Please enter a valid email address (e.g. name@domain.com).");
+      emailInput.focus();
+      return;
+    }
+
     // Validate phone number
-    if (!validatePhone()) {
+    if (!validatePhone(true)) {
       showError("Please enter a valid UK phone number (10 or 11 digits, numbers only).");
       phoneInput.focus();
       return;
     }
 
     // Validate postcode
-    if (!validatePostcodeField()) {
+    if (!validatePostcodeField(true)) {
       showError("Please enter a valid UK postcode (e.g. KT10 0PQ).");
       addressPostcode.focus();
       return;

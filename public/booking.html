@@ -57,13 +57,14 @@
 
           <div class="form-group">
             <label for="email">Email Address *</label>
-            <input type="email" id="email" name="email" class="form-control" placeholder="you@example.com" required>
+            <input type="email" id="email" name="email" class="form-control" placeholder="you@example.com" required autocomplete="email" maxlength="100">
+            <small class="field-hint" id="emailHint">Enter your valid email address (e.g. name@domain.com)</small>
           </div>
 
           <div class="form-group">
             <label for="phone">Contact Telephone *</label>
-            <input type="tel" id="phone" name="phone" class="form-control" placeholder="07123 456789" required inputmode="numeric" autocomplete="tel">
-            <small class="field-hint" id="phoneHint">UK telephone number (10–11 digits)</small>
+            <input type="tel" id="phone" name="phone" class="form-control" placeholder="07123 456789" required inputmode="numeric" autocomplete="tel" maxlength="16">
+            <small class="field-hint" id="phoneHint">Numbers only &bull; 10–11 UK digits (e.g. 07772 278392)</small>
           </div>
 
           <!-- Address Section (Lookup + Split fields) -->
@@ -225,6 +226,6 @@
     </div>
   </footer>
 
-  <script src="/js/booking.js"></script>
+  <script src="/js/booking.js?v=2.1"></script>
 </body>
 </html>

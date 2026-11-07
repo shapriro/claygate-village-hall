@@ -12,7 +12,13 @@ export default {
       return handlePricingApi(request, env);
     }
 
-    // 3. Static Assets: Fallback to Cloudflare Assets binding
+    // 3. API: Postcode Lookup Proxy (Bypasses any browser CORS or ISP filters)
+    if (url.pathname.startsWith("/api/postcode/")) {
+      const pc = url.pathname.replace("/api/postcode/", "").trim();
+      return handlePostcodeProxy(pc);
+    }
+
+    // 4. Static Assets: Fallback to Cloudflare Assets binding
     if (env.ASSETS) {
       return env.ASSETS.fetch(request);
     }
@@ -212,6 +218,22 @@ async function handlePricingApi(request, env) {
 
   const pricing = customPricingMatrix || getDefaultPricing();
   return jsonResponse({ pricing });
+}
+
+async function handlePostcodeProxy(postcode) {
+  if (!postcode) {
+    return jsonResponse({ error: "Postcode parameter missing" }, 400);
+  }
+  const clean = postcode.replace(/\s+/g, "").toUpperCase();
+  try {
+    const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(clean)}`, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+    });
+    const data = await res.json();
+    return jsonResponse(data, res.status);
+  } catch (err) {
+    return jsonResponse({ error: "Lookup request failed: " + err.message }, 502);
+  }
 }
 
 function jsonResponse(data, status = 200) {
