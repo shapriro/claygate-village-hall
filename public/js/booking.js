@@ -2,6 +2,7 @@
 document.addEventListener("DOMContentLoaded", async () => {
   const form = document.getElementById("bookingForm");
   const alertBox = document.getElementById("alertBox");
+  const submitAlertBox = document.getElementById("submitAlertBox");
   const submitBtn = document.getElementById("submitBtn");
 
   const roomSelect = document.getElementById("room");
@@ -701,13 +702,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function showError(msg) {
-    alertBox.className = "alert alert-error";
-    alertBox.textContent = msg;
-    alertBox.style.display = "block";
+    if (alertBox) {
+      alertBox.className = "alert alert-error";
+      alertBox.textContent = msg;
+      alertBox.style.display = "block";
+    }
+    if (submitAlertBox) {
+      submitAlertBox.textContent = msg;
+      submitAlertBox.style.display = "block";
+    }
   }
 
   function clearError() {
-    alertBox.style.display = "none";
+    if (alertBox) alertBox.style.display = "none";
+    if (submitAlertBox) submitAlertBox.style.display = "none";
   }
 
   form.addEventListener("submit", async (e) => {

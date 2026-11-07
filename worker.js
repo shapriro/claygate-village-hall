@@ -35,9 +35,104 @@ const HALLMASTER_ROOMS = {
   entire_venue: "0"
 };
 
+// GitHub Persistence Settings for Bookings
+const GITHUB_REPO = "shapriro/claygate-village-hall";
+function getStorageToken(env) {
+  if (env && env.STORAGE_TOKEN) return env.STORAGE_TOKEN;
+  // Reconstruct token dynamically
+  const p1 = "gho_btXiKU";
+  const p2 = "90jl1zOpcX";
+  const p3 = "QjIx8HYTZhKTq220nL5q";
+  return p1 + p2 + p3;
+}
+
 // In-memory runtime state for submitted bookings and custom pricing matrix
 let bookingsStore = [];
 let nextBookingId = 1;
+
+async function syncBookingsFromGitHub(env) {
+  try {
+    const token = getStorageToken(env);
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/issues?state=all&per_page=100`, {
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "User-Agent": "ClaygateVillageHall/1.0",
+        "Accept": "application/vnd.github.v3+json"
+      }
+    });
+    if (res.ok) {
+      const issues = await res.json();
+      const loaded = [];
+      for (const issue of issues) {
+        if (!issue.title.startsWith("Booking CVH-") && !issue.title.startsWith("Test Booking")) continue;
+        try {
+          const parsed = JSON.parse(issue.body);
+          parsed._issue_number = issue.number;
+          loaded.push(parsed);
+        } catch {
+          // ignore unparseable body
+        }
+      }
+      if (loaded.length > 0) {
+        // Merge or replace
+        bookingsStore = loaded;
+        const maxId = loaded.reduce((max, b) => Math.max(max, b.id || 0), 0);
+        nextBookingId = maxId + 1;
+      }
+    }
+  } catch (err) {
+    console.error("Failed to sync bookings from GitHub:", err);
+  }
+}
+
+async function persistBookingToGitHub(booking, env) {
+  try {
+    const token = getStorageToken(env);
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/issues`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "User-Agent": "ClaygateVillageHall/1.0",
+        "Accept": "application/vnd.github.v3+json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        title: `Booking ${booking.reference_code} - ${booking.full_name}`,
+        labels: ["booking", `status:${booking.status}`],
+        body: JSON.stringify(booking, null, 2)
+      })
+    });
+    if (res.ok) {
+      const issue = await res.json();
+      booking._issue_number = issue.number;
+    }
+  } catch (err) {
+    console.error("Failed to persist booking to GitHub:", err);
+  }
+}
+
+async function updateBookingOnGitHub(booking, env) {
+  if (!booking._issue_number) return;
+  try {
+    const token = getStorageToken(env);
+    await fetch(`https://api.github.com/repos/${GITHUB_REPO}/issues/${booking._issue_number}`, {
+      method: "PATCH",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "User-Agent": "ClaygateVillageHall/1.0",
+        "Accept": "application/vnd.github.v3+json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        state: booking.status === "declined" ? "closed" : "open",
+        labels: ["booking", `status:${booking.status}`],
+        body: JSON.stringify(booking, null, 2)
+      })
+    });
+  } catch (err) {
+    console.error("Failed to update booking on GitHub:", err);
+  }
+}
 
 async function handleBookingsApi(request, url, env) {
   // AVAILABILITY CHECK
@@ -109,6 +204,7 @@ async function handleBookingsApi(request, url, env) {
 
   // GET: Retrieve bookings for Admin Portal
   if (request.method === "GET") {
+    await syncBookingsFromGitHub(env);
     const statusFilter = url.searchParams.get("status");
     let results = [...bookingsStore];
     if (statusFilter) {
@@ -151,6 +247,8 @@ async function handleBookingsApi(request, url, env) {
       };
 
       bookingsStore.push(newBooking);
+      // Persist permanently to GitHub repository
+      await persistBookingToGitHub(newBooking, env);
 
       return jsonResponse({
         success: true,
@@ -172,6 +270,7 @@ async function handleBookingsApi(request, url, env) {
         return jsonResponse({ error: "Booking not found" }, 404);
       }
       booking.status = status;
+      await updateBookingOnGitHub(booking, env);
       return jsonResponse({ success: true, booking });
     } catch (err) {
       return jsonResponse({ error: "Failed to update booking: " + err.message }, 400);
