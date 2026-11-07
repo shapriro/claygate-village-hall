@@ -456,8 +456,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       endH = 23;
       endM = 30;
     }
-    const suggested = `${endH.toString().padStart(2, "0")}:${endM.toString().padStart(2, "0")}`;
-    if (!endTimeInput.value || endTimeInput.value <= startVal) {
+    let suggested = `${endH.toString().padStart(2, "0")}:${endM.toString().padStart(2, "0")}`;
+
+    // If an existing booking starts before suggested end time, suggest up to that booking
+    if (bookedSlots.length > 0) {
+      const nextBooking = bookedSlots
+        .filter(b => b.start_time > startVal)
+        .sort((a, b) => a.start_time.localeCompare(b.start_time))[0];
+      if (nextBooking && nextBooking.start_time < suggested) {
+        suggested = nextBooking.start_time;
+      }
+    }
+
+    if (!endTimeInput.value || endTimeInput.value <= startVal || endTimeInput.value > suggested) {
       endTimeInput.value = suggested;
     }
   }
@@ -490,6 +501,44 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (endTimeHint) endTimeHint.classList.remove("error", "success");
     startTimeInput.classList.remove("is-invalid");
     endTimeInput.classList.remove("is-invalid");
+
+    // 0. Prevent picking a start time that falls inside an existing booked slot
+    if (s && bookedSlots.length > 0) {
+      const startInBusy = bookedSlots.find(b => s >= b.start_time && s < b.end_time);
+      if (startInBusy) {
+        const reason = startInBusy.title || startInBusy.reason || "an existing booking";
+        const msg = `Start time (${s}) is unavailable — ${reason} is booked from ${startInBusy.start_time} to ${startInBusy.end_time}.`;
+        showError(msg);
+        startTimeInput.classList.add("is-invalid");
+        if (startTimeHint) {
+          startTimeHint.textContent = `Unavailable: booked ${startInBusy.start_time}-${startInBusy.end_time}`;
+          startTimeHint.classList.add("error");
+        }
+        submitBtn.disabled = true;
+        // Clear conflicting start time value to strictly prevent entering it
+        startTimeInput.value = "";
+        return false;
+      }
+    }
+
+    // 0b. Prevent picking an end time that falls inside an existing booked slot
+    if (e && bookedSlots.length > 0) {
+      const endInBusy = bookedSlots.find(b => e > b.start_time && e <= b.end_time);
+      if (endInBusy) {
+        const reason = endInBusy.title || endInBusy.reason || "an existing booking";
+        const msg = `End time (${e}) is unavailable — ${reason} is booked from ${endInBusy.start_time} to ${endInBusy.end_time}.`;
+        showError(msg);
+        endTimeInput.classList.add("is-invalid");
+        if (endTimeHint) {
+          endTimeHint.textContent = `Unavailable: booked ${endInBusy.start_time}-${endInBusy.end_time}`;
+          endTimeHint.classList.add("error");
+        }
+        submitBtn.disabled = true;
+        // Clear conflicting end time value to strictly prevent entering it
+        endTimeInput.value = "";
+        return false;
+      }
+    }
 
     if (!s && !e) return true;
 
