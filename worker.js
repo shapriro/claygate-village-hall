@@ -384,6 +384,95 @@ async function handleBookingsApi(request, url, env) {
     }
   }
 
+  // PUT: Full update of booking details from Admin Portal edit modal
+  if (request.method === "PUT") {
+    try {
+      const data = await request.json();
+      const id = Number(data.id);
+      if (!id) {
+        return jsonResponse({ error: "Missing booking ID" }, 400);
+      }
+
+      if (db) {
+        const stmt = db.prepare(`
+          UPDATE bookings SET
+            full_name = ?,
+            organization = ?,
+            email = ?,
+            phone = ?,
+            address = ?,
+            address_line1 = ?,
+            address_city = ?,
+            address_postcode = ?,
+            room = ?,
+            event_type = ?,
+            event_date = ?,
+            start_time = ?,
+            end_time = ?,
+            guest_count = ?,
+            requires_stage = ?,
+            requires_kitchen = ?,
+            special_requirements = ?,
+            estimated_cost = ?,
+            status = ?
+          WHERE id = ?
+        `);
+
+        await stmt.bind(
+          data.full_name || "",
+          data.organization || "",
+          data.email || "",
+          data.phone || "",
+          data.address || "",
+          data.address_line1 || "",
+          data.address_city || "",
+          data.address_postcode || "",
+          data.room || "main_hall",
+          data.event_type || "other",
+          data.event_date || "",
+          data.start_time || "",
+          data.end_time || "",
+          parseInt(data.guest_count, 10) || 0,
+          data.requires_stage ? 1 : 0,
+          data.requires_kitchen ? 1 : 0,
+          data.special_requirements || "",
+          parseFloat(data.estimated_cost) || 0.0,
+          data.status || "pending",
+          id
+        ).run();
+
+        return jsonResponse({ success: true, message: "Booking updated successfully" });
+      }
+
+      const booking = bookingsStore.find(b => b.id === id);
+      if (!booking) {
+        return jsonResponse({ error: "Booking not found" }, 404);
+      }
+      Object.assign(booking, data);
+      return jsonResponse({ success: true, booking });
+    } catch (err) {
+      return jsonResponse({ error: "Failed to update booking: " + err.message }, 400);
+    }
+  }
+
+  // DELETE: Delete booking from Admin Portal
+  if (request.method === "DELETE") {
+    try {
+      const { id } = await request.json();
+      if (!id) {
+        return jsonResponse({ error: "Missing booking ID" }, 400);
+      }
+      if (db) {
+        await db.prepare("DELETE FROM bookings WHERE id = ?").bind(Number(id)).run();
+        return jsonResponse({ success: true, message: "Booking deleted successfully" });
+      }
+      bookingsStore = bookingsStore.filter(b => b.id !== Number(id));
+      return jsonResponse({ success: true });
+    } catch (err) {
+      return jsonResponse({ error: "Failed to delete booking: " + err.message }, 400);
+    }
+  }
+
   // PATCH: Update booking status (confirm/decline) from Admin Portal
   if (request.method === "PATCH") {
     try {

@@ -1,6 +1,7 @@
 // Admin Dashboard Logic: Bookings & Pricing Administration
 let token = sessionStorage.getItem("cvh_admin_token") || "";
 let currentPricingList = [];
+let loadedBookings = [];
 
 // Room sort weight priority
 const ROOM_ORDER = {
@@ -156,8 +157,9 @@ async function loadBookings() {
     }
 
     const bookings = data.bookings || [];
+    loadedBookings = bookings;
     if (bookings.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding: 2.5rem; color: var(--text-muted);">No booking requests found. New submissions from the booking form will appear here automatically.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding: 2.5rem; color: var(--text-muted);">No booking requests found. New submissions from the booking form will appear here automatically.</td></tr>`;
       return;
     }
 
@@ -196,12 +198,13 @@ async function loadBookings() {
         <td style="text-align:center; font-weight:600;">
           ${b.guest_count || "-"}
         </td>
-        <td>
-          ${b.requires_stage ? '<span class="badge badge-amber" style="font-size:0.7rem;">Stage</span><br>' : ''}
-          ${b.requires_kitchen ? '<span class="badge badge-green" style="font-size:0.7rem;">Kitchen</span>' : ''}
-          ${!b.requires_stage && !b.requires_kitchen ? '<small style="color:var(--text-muted);">None</small>' : ''}
+        <td style="text-align:center;">
+          ${b.requires_stage ? '<span class="badge badge-amber" style="font-size:0.72rem; margin:0;">Yes</span>' : '<span style="color:var(--text-muted); font-size:0.8rem;">No</span>'}
         </td>
-        <td style="max-width: 200px; font-size:0.82rem; color:#475569;">
+        <td style="text-align:center;">
+          ${b.requires_kitchen ? '<span class="badge badge-green" style="font-size:0.72rem; margin:0;">Yes</span>' : '<span style="color:var(--text-muted); font-size:0.8rem;">No</span>'}
+        </td>
+        <td style="max-width: 180px; font-size:0.82rem; color:#475569;">
           ${b.special_requirements ? escapeHtml(b.special_requirements) : '<span style="color:#94a3b8;">None</span>'}
         </td>
         <td>
@@ -211,9 +214,11 @@ async function loadBookings() {
           <span class="status-tag status-${b.status.toLowerCase()}">${escapeHtml(b.status)}</span>
         </td>
         <td>
-          <div style="display:flex; flex-direction:column; gap:0.3rem;">
+          <div style="display:flex; flex-direction:column; gap:0.35rem;">
+            <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.6rem; font-size:0.78rem;" onclick="openEditBookingModal(${b.id})">✏️ Edit</button>
             ${b.status !== 'confirmed' ? `<button class="btn btn-sm btn-primary" style="padding:0.25rem 0.6rem; font-size:0.78rem;" onclick="updateStatus(${b.id}, 'confirmed')">Confirm</button>` : ''}
-            ${b.status !== 'declined' ? `<button class="btn btn-sm btn-outline" style="padding:0.25rem 0.6rem; font-size:0.78rem;" onclick="updateStatus(${b.id}, 'declined')">Decline</button>` : ''}
+            ${b.status !== 'pending' ? `<button class="btn btn-sm btn-outline" style="padding:0.25rem 0.6rem; font-size:0.78rem; color:#b45309; border-color:#fde68a;" onclick="updateStatus(${b.id}, 'pending')">Mark Pending</button>` : ''}
+            ${b.status !== 'declined' ? `<button class="btn btn-sm btn-outline" style="padding:0.25rem 0.6rem; font-size:0.78rem; color:#b91c1c; border-color:#fecaca;" onclick="updateStatus(${b.id}, 'declined')">Decline</button>` : ''}
           </div>
         </td>
       </tr>
@@ -221,7 +226,7 @@ async function loadBookings() {
     }).join("");
 
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding: 2rem; color: var(--danger);">${err.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding: 2rem; color: var(--danger);">${err.message}</td></tr>`;
   }
 }
 
@@ -440,3 +445,154 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+
+// Modal handling for Editing Bookings
+function openEditBookingModal(bookingId) {
+  const booking = loadedBookings.find(b => b.id === bookingId);
+  if (!booking) return;
+
+  document.getElementById("editBookingId").value = booking.id;
+  document.getElementById("editModalTitle").textContent = `✏️ Edit Booking: ${booking.reference_code}`;
+  document.getElementById("editFullName").value = booking.full_name || "";
+  document.getElementById("editOrganization").value = booking.organization || "";
+  document.getElementById("editEmail").value = booking.email || "";
+  document.getElementById("editPhone").value = booking.phone || "";
+  document.getElementById("editAddressLine1").value = booking.address_line1 || "";
+  document.getElementById("editAddressCity").value = booking.address_city || "";
+  document.getElementById("editAddressPostcode").value = booking.address_postcode || "";
+  document.getElementById("editRoom").value = booking.room || "main_hall";
+  document.getElementById("editEventType").value = booking.event_type || "other";
+  document.getElementById("editEventDate").value = booking.event_date || "";
+  document.getElementById("editGuestCount").value = booking.guest_count || "";
+  document.getElementById("editStartTime").value = booking.start_time || "";
+  document.getElementById("editEndTime").value = booking.end_time || "";
+  document.getElementById("editEstimatedCost").value = parseFloat(booking.estimated_cost) || 0;
+  document.getElementById("editStatus").value = booking.status || "pending";
+  document.getElementById("editRequiresStage").checked = !!booking.requires_stage;
+  document.getElementById("editRequiresKitchen").checked = !!booking.requires_kitchen;
+  document.getElementById("editSpecialRequirements").value = booking.special_requirements || "";
+
+  document.getElementById("editBookingModal").style.display = "flex";
+}
+
+function closeEditBookingModal() {
+  const modal = document.getElementById("editBookingModal");
+  if (modal) modal.style.display = "none";
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const closeBtn = document.getElementById("closeEditModalBtn");
+  const cancelBtn = document.getElementById("cancelEditBtn");
+  const editForm = document.getElementById("editBookingForm");
+  const deleteBtn = document.getElementById("deleteBookingBtn");
+
+  if (closeBtn) closeBtn.addEventListener("click", closeEditBookingModal);
+  if (cancelBtn) cancelBtn.addEventListener("click", closeEditBookingModal);
+
+  // Close when clicking modal backdrop
+  const modal = document.getElementById("editBookingModal");
+  if (modal) {
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closeEditBookingModal();
+    });
+  }
+
+  // Handle Edit Save
+  if (editForm) {
+    editForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const id = Number(document.getElementById("editBookingId").value);
+      if (!id) return;
+
+      const l1 = document.getElementById("editAddressLine1").value.trim();
+      const city = document.getElementById("editAddressCity").value.trim();
+      const pc = document.getElementById("editAddressPostcode").value.trim();
+      const fullAddr = [l1, city, pc].filter(Boolean).join(", ");
+
+      const payload = {
+        id,
+        full_name: document.getElementById("editFullName").value.trim(),
+        organization: document.getElementById("editOrganization").value.trim(),
+        email: document.getElementById("editEmail").value.trim(),
+        phone: document.getElementById("editPhone").value.trim(),
+        address: fullAddr,
+        address_line1: l1,
+        address_city: city,
+        address_postcode: pc,
+        room: document.getElementById("editRoom").value,
+        event_type: document.getElementById("editEventType").value,
+        event_date: document.getElementById("editEventDate").value,
+        guest_count: parseInt(document.getElementById("editGuestCount").value, 10) || 0,
+        start_time: document.getElementById("editStartTime").value,
+        end_time: document.getElementById("editEndTime").value,
+        estimated_cost: parseFloat(document.getElementById("editEstimatedCost").value) || 0,
+        status: document.getElementById("editStatus").value,
+        requires_stage: document.getElementById("editRequiresStage").checked,
+        requires_kitchen: document.getElementById("editRequiresKitchen").checked,
+        special_requirements: document.getElementById("editSpecialRequirements").value.trim()
+      };
+
+      const saveBtn = document.getElementById("saveBookingChangesBtn");
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saving...";
+
+      try {
+        const res = await fetch("/api/bookings", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          closeEditBookingModal();
+          await loadBookings();
+        } else {
+          alert("Error updating booking: " + (data.error || "Unknown error"));
+        }
+      } catch (err) {
+        alert("Network error: " + err.message);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save Changes";
+      }
+    });
+  }
+
+  // Handle Delete
+  if (deleteBtn) {
+    deleteBtn.addEventListener("click", async () => {
+      const id = Number(document.getElementById("editBookingId").value);
+      if (!id) return;
+      if (!confirm(`Are you sure you want to permanently delete booking #${id}? This cannot be undone.`)) return;
+
+      deleteBtn.disabled = true;
+      deleteBtn.textContent = "Deleting...";
+
+      try {
+        const res = await fetch("/api/bookings", {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({ id })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          closeEditBookingModal();
+          await loadBookings();
+        } else {
+          alert("Error deleting booking: " + (data.error || "Unknown error"));
+        }
+      } catch (err) {
+        alert("Network error: " + err.message);
+      } finally {
+        deleteBtn.disabled = false;
+        deleteBtn.textContent = "Delete Booking";
+      }
+    });
+  }
+});
