@@ -2,6 +2,57 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // Initial setup endpoint to run schema creation on D1 and report any errors
+    if (url.pathname === "/api/setup-db") {
+      const db = env.DB || env.cvh_db;
+      if (!db) {
+        return jsonResponse({ error: "No DB binding found in env" }, 500);
+      }
+      try {
+        const r1 = await db.prepare(`
+          CREATE TABLE IF NOT EXISTS bookings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reference_code TEXT UNIQUE,
+            full_name TEXT,
+            organization TEXT,
+            email TEXT,
+            phone TEXT,
+            address TEXT,
+            address_line1 TEXT,
+            address_city TEXT,
+            address_postcode TEXT,
+            room TEXT,
+            event_type TEXT,
+            event_date TEXT,
+            start_time TEXT,
+            end_time TEXT,
+            guest_count INTEGER,
+            requires_stage INTEGER,
+            requires_kitchen INTEGER,
+            special_requirements TEXT,
+            estimated_cost REAL,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT
+          )
+        `).run();
+
+        const r2 = await db.prepare(`
+          CREATE TABLE IF NOT EXISTS pricing (
+            key TEXT PRIMARY KEY,
+            room TEXT,
+            category TEXT,
+            name TEXT,
+            price REAL,
+            unit TEXT
+          )
+        `).run();
+
+        return jsonResponse({ success: true, r1, r2, message: "Tables created in D1 successfully" });
+      } catch (err) {
+        return jsonResponse({ error: err.message, stack: err.stack }, 500);
+      }
+    }
+
     // Diagnostics endpoint to inspect bindings
     if (url.pathname === "/api/debug-env") {
       const keys = Object.keys(env || {});
