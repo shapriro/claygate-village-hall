@@ -2,6 +2,17 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // Diagnostics endpoint to inspect bindings
+    if (url.pathname === "/api/debug-env") {
+      const keys = Object.keys(env || {});
+      const hasDB = !!(env.DB || env.cvh_db);
+      return jsonResponse({
+        bindingKeys: keys,
+        hasDB,
+        dbType: typeof (env.DB || env.cvh_db)
+      });
+    }
+
     // 1. API: Bookings & Live Hallmaster Proxy
     if (url.pathname.startsWith("/api/bookings")) {
       return handleBookingsApi(request, url, env);
