@@ -35,106 +35,63 @@ const HALLMASTER_ROOMS = {
   entire_venue: "0"
 };
 
-// GitHub Persistence Settings for Bookings
-const GITHUB_REPO = "shapriro/claygate-village-hall";
-function getStorageToken(env) {
-  if (env && env.STORAGE_TOKEN) return env.STORAGE_TOKEN;
-  // Reconstruct token dynamically
-  const p1 = "gho_btXiKU";
-  const p2 = "90jl1zOpcX";
-  const p3 = "QjIx8HYTZhKTq220nL5q";
-  return p1 + p2 + p3;
+// Database helper: Initialize D1 tables if they don't exist yet
+let d1Initialized = false;
+
+async function ensureD1Tables(db) {
+  if (d1Initialized || !db) return;
+  try {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS bookings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reference_code TEXT UNIQUE,
+        full_name TEXT,
+        organization TEXT,
+        email TEXT,
+        phone TEXT,
+        address TEXT,
+        address_line1 TEXT,
+        address_city TEXT,
+        address_postcode TEXT,
+        room TEXT,
+        event_type TEXT,
+        event_date TEXT,
+        start_time TEXT,
+        end_time TEXT,
+        guest_count INTEGER,
+        requires_stage INTEGER,
+        requires_kitchen INTEGER,
+        special_requirements TEXT,
+        estimated_cost REAL,
+        status TEXT DEFAULT 'pending',
+        created_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS pricing (
+        key TEXT PRIMARY KEY,
+        room TEXT,
+        category TEXT,
+        name TEXT,
+        price REAL,
+        unit TEXT
+      );
+    `);
+    d1Initialized = true;
+  } catch (err) {
+    console.error("D1 schema init error:", err);
+  }
 }
 
-// In-memory runtime state for submitted bookings and custom pricing matrix
+// In-memory fallback if DB binding is not yet attached
 let bookingsStore = [];
 let nextBookingId = 1;
 
-async function syncBookingsFromGitHub(env) {
-  try {
-    const token = getStorageToken(env);
-    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/issues?state=all&per_page=100`, {
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "User-Agent": "ClaygateVillageHall/1.0",
-        "Accept": "application/vnd.github.v3+json"
-      }
-    });
-    if (res.ok) {
-      const issues = await res.json();
-      const loaded = [];
-      for (const issue of issues) {
-        if (!issue.title.startsWith("Booking CVH-") && !issue.title.startsWith("Test Booking")) continue;
-        try {
-          const parsed = JSON.parse(issue.body);
-          parsed._issue_number = issue.number;
-          loaded.push(parsed);
-        } catch {
-          // ignore unparseable body
-        }
-      }
-      if (loaded.length > 0) {
-        // Merge or replace
-        bookingsStore = loaded;
-        const maxId = loaded.reduce((max, b) => Math.max(max, b.id || 0), 0);
-        nextBookingId = maxId + 1;
-      }
-    }
-  } catch (err) {
-    console.error("Failed to sync bookings from GitHub:", err);
-  }
-}
-
-async function persistBookingToGitHub(booking, env) {
-  try {
-    const token = getStorageToken(env);
-    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/issues`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "User-Agent": "ClaygateVillageHall/1.0",
-        "Accept": "application/vnd.github.v3+json",
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        title: `Booking ${booking.reference_code} - ${booking.full_name}`,
-        labels: ["booking", `status:${booking.status}`],
-        body: JSON.stringify(booking, null, 2)
-      })
-    });
-    if (res.ok) {
-      const issue = await res.json();
-      booking._issue_number = issue.number;
-    }
-  } catch (err) {
-    console.error("Failed to persist booking to GitHub:", err);
-  }
-}
-
-async function updateBookingOnGitHub(booking, env) {
-  if (!booking._issue_number) return;
-  try {
-    const token = getStorageToken(env);
-    await fetch(`https://api.github.com/repos/${GITHUB_REPO}/issues/${booking._issue_number}`, {
-      method: "PATCH",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "User-Agent": "ClaygateVillageHall/1.0",
-        "Accept": "application/vnd.github.v3+json",
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        state: booking.status === "declined" ? "closed" : "open",
-        labels: ["booking", `status:${booking.status}`],
-        body: JSON.stringify(booking, null, 2)
-      })
-    });
-  } catch (err) {
-    console.error("Failed to update booking on GitHub:", err);
-  }
-}
-
 async function handleBookingsApi(request, url, env) {
+  const db = env.DB || env.cvh_db;
+  if (db) {
+    await ensureD1Tables(db);
+  }
+
   // AVAILABILITY CHECK
   if (url.searchParams.get("availability") === "1") {
     const dateStr = url.searchParams.get("date");
@@ -184,33 +141,77 @@ async function handleBookingsApi(request, url, env) {
       console.error("Hallmaster fetch error:", err);
     }
 
-    // 2. Also include confirmed submissions from our booking portal
-    bookingsStore
-      .filter(b => b.status === "confirmed" && (b.room === room || room === "entire_venue" || b.room === "entire_venue"))
-      .forEach(b => {
-        busySlots.push({
-          start_date: b.event_date,
-          start_time: b.start_time,
-          end_time: b.end_time,
-          status: "confirmed",
-          title: b.organization || b.full_name || "Online Reservation",
-          room_id: hmRoomId,
-          source: "portal"
+    // 2. Also include confirmed submissions from our booking database
+    if (db) {
+      try {
+        const { results } = await db.prepare(
+          `SELECT * FROM bookings WHERE status = 'confirmed' AND (room = ? OR ? = 'entire_venue' OR room = 'entire_venue')`
+        ).bind(room, room).all();
+        (results || []).forEach(b => {
+          busySlots.push({
+            start_date: b.event_date,
+            start_time: b.start_time,
+            end_time: b.end_time,
+            status: "confirmed",
+            title: b.organization || b.full_name || "Online Reservation",
+            room_id: hmRoomId,
+            source: "portal"
+          });
         });
-      });
+      } catch (err) {
+        console.error("D1 availability query error:", err);
+      }
+    } else {
+      bookingsStore
+        .filter(b => b.status === "confirmed" && (b.room === room || room === "entire_venue" || b.room === "entire_venue"))
+        .forEach(b => {
+          busySlots.push({
+            start_date: b.event_date,
+            start_time: b.start_time,
+            end_time: b.end_time,
+            status: "confirmed",
+            title: b.organization || b.full_name || "Online Reservation",
+            room_id: hmRoomId,
+            source: "portal"
+          });
+        });
+    }
 
     return jsonResponse({ bookedSlots: busySlots });
   }
 
   // GET: Retrieve bookings for Admin Portal
   if (request.method === "GET") {
-    await syncBookingsFromGitHub(env);
     const statusFilter = url.searchParams.get("status");
+
+    if (db) {
+      try {
+        let query = `SELECT * FROM bookings`;
+        const params = [];
+        if (statusFilter) {
+          query += ` WHERE LOWER(status) = LOWER(?)`;
+          params.push(statusFilter);
+        }
+        query += ` ORDER BY id DESC`;
+        const stmt = params.length ? db.prepare(query).bind(...params) : db.prepare(query);
+        const { results } = await stmt.all();
+        // Format boolean flags for UI
+        const formatted = (results || []).map(b => ({
+          ...b,
+          requires_stage: !!b.requires_stage,
+          requires_kitchen: !!b.requires_kitchen
+        }));
+        return jsonResponse({ bookings: formatted });
+      } catch (err) {
+        console.error("D1 select error:", err);
+      }
+    }
+
+    // Fallback
     let results = [...bookingsStore];
     if (statusFilter) {
       results = results.filter(b => b.status.toLowerCase() === statusFilter.toLowerCase());
     }
-    // Most recent first
     results.sort((a, b) => (b.id || 0) - (a.id || 0));
     return jsonResponse({ bookings: results });
   }
@@ -220,7 +221,60 @@ async function handleBookingsApi(request, url, env) {
     try {
       const data = await request.json();
       const refCode = "CVH-" + Math.random().toString(36).substring(2, 8).toUpperCase();
-      
+      const createdAt = new Date().toISOString();
+
+      if (db) {
+        const stmt = db.prepare(`
+          INSERT INTO bookings (
+            reference_code, full_name, organization, email, phone,
+            address, address_line1, address_city, address_postcode,
+            room, event_type, event_date, start_time, end_time,
+            guest_count, requires_stage, requires_kitchen,
+            special_requirements, estimated_cost, status, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        const res = await stmt.bind(
+          refCode,
+          data.full_name || "",
+          data.organization || "",
+          data.email || "",
+          data.phone || "",
+          data.address || "",
+          data.address_line1 || "",
+          data.address_city || "",
+          data.address_postcode || "",
+          data.room || "main_hall",
+          data.event_type || "other",
+          data.event_date || "",
+          data.start_time || "",
+          data.end_time || "",
+          parseInt(data.guest_count, 10) || 0,
+          data.requires_stage ? 1 : 0,
+          data.requires_kitchen ? 1 : 0,
+          data.special_requirements || "",
+          parseFloat(data.estimated_cost) || 0.0,
+          "pending",
+          createdAt
+        ).run();
+
+        const createdBooking = {
+          id: res.meta?.last_row_id || 1,
+          reference_code: refCode,
+          ...data,
+          status: "pending",
+          created_at: createdAt
+        };
+
+        return jsonResponse({
+          success: true,
+          reference_code: refCode,
+          booking: createdBooking,
+          message: "Booking received and saved securely to Cloudflare D1"
+        }, 201);
+      }
+
+      // Memory fallback
       const newBooking = {
         id: nextBookingId++,
         reference_code: refCode,
@@ -243,18 +297,15 @@ async function handleBookingsApi(request, url, env) {
         special_requirements: data.special_requirements || "",
         estimated_cost: parseFloat(data.estimated_cost) || 0.0,
         status: "pending",
-        created_at: new Date().toISOString()
+        created_at: createdAt
       };
-
       bookingsStore.push(newBooking);
-      // Persist permanently to GitHub repository
-      await persistBookingToGitHub(newBooking, env);
 
       return jsonResponse({
         success: true,
         reference_code: refCode,
         booking: newBooking,
-        message: "Booking received and saved to admin dashboard"
+        message: "Booking received and saved"
       }, 201);
     } catch (err) {
       return jsonResponse({ error: "Failed to parse booking: " + err.message }, 400);
@@ -265,12 +316,16 @@ async function handleBookingsApi(request, url, env) {
   if (request.method === "PATCH") {
     try {
       const { id, status } = await request.json();
+      if (db) {
+        await db.prepare(`UPDATE bookings SET status = ? WHERE id = ?`).bind(status, Number(id)).run();
+        return jsonResponse({ success: true, id, status });
+      }
+
       const booking = bookingsStore.find(b => b.id === Number(id));
       if (!booking) {
         return jsonResponse({ error: "Booking not found" }, 404);
       }
       booking.status = status;
-      await updateBookingOnGitHub(booking, env);
       return jsonResponse({ success: true, booking });
     } catch (err) {
       return jsonResponse({ error: "Failed to update booking: " + err.message }, 400);
@@ -303,15 +358,43 @@ function getDefaultPricing() {
 }
 
 async function handlePricingApi(request, env) {
+  const db = env.DB || env.cvh_db;
+  if (db) {
+    await ensureD1Tables(db);
+  }
+
   if (request.method === "POST") {
     try {
       const body = await request.json();
       if (Array.isArray(body.pricing)) {
-        customPricingMatrix = body.pricing;
+        if (db) {
+          const insertStmt = db.prepare(`
+            INSERT OR REPLACE INTO pricing (key, room, category, name, price, unit)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `);
+          const batch = body.pricing.map(p =>
+            insertStmt.bind(p.key, p.room, p.category, p.name, parseFloat(p.price) || 0, p.unit)
+          );
+          await db.batch(batch);
+        } else {
+          customPricingMatrix = body.pricing;
+        }
       }
-      return jsonResponse({ success: true, message: "Pricing saved" });
+      return jsonResponse({ success: true, message: "Pricing saved securely" });
     } catch (err) {
       return jsonResponse({ error: "Invalid pricing payload: " + err.message }, 400);
+    }
+  }
+
+  // GET pricing
+  if (db) {
+    try {
+      const { results } = await db.prepare("SELECT * FROM pricing").all();
+      if (results && results.length > 0) {
+        return jsonResponse({ pricing: results });
+      }
+    } catch (err) {
+      console.error("D1 pricing read error:", err);
     }
   }
 
