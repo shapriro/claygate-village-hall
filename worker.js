@@ -47,12 +47,10 @@ const HALLMASTER_ROOMS = {
 };
 
 // Database helper: Initialize D1 tables if they don't exist yet
-let d1Initialized = false;
-
 async function ensureD1Tables(db) {
-  if (d1Initialized || !db) return;
+  if (!db) return;
   try {
-    await db.exec(`
+    await db.prepare(`
       CREATE TABLE IF NOT EXISTS bookings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         reference_code TEXT UNIQUE,
@@ -76,8 +74,10 @@ async function ensureD1Tables(db) {
         estimated_cost REAL,
         status TEXT DEFAULT 'pending',
         created_at TEXT
-      );
+      )
+    `).run();
 
+    await db.prepare(`
       CREATE TABLE IF NOT EXISTS pricing (
         key TEXT PRIMARY KEY,
         room TEXT,
@@ -85,9 +85,8 @@ async function ensureD1Tables(db) {
         name TEXT,
         price REAL,
         unit TEXT
-      );
-    `);
-    d1Initialized = true;
+      )
+    `).run();
   } catch (err) {
     console.error("D1 schema init error:", err);
   }
