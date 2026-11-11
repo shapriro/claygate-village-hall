@@ -47,7 +47,54 @@ export default {
           )
         `).run();
 
-        return jsonResponse({ success: true, r1, r2, message: "Tables created in D1 successfully" });
+        await db.prepare(`
+          CREATE TABLE IF NOT EXISTS admin_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            email TEXT UNIQUE,
+            name TEXT,
+            password_hash TEXT,
+            role TEXT DEFAULT 'admin',
+            can_read_bookings INTEGER DEFAULT 1,
+            can_write_bookings INTEGER DEFAULT 1,
+            can_read_pricing INTEGER DEFAULT 1,
+            can_write_pricing INTEGER DEFAULT 1,
+            can_manage_users INTEGER DEFAULT 0,
+            can_view_audit INTEGER DEFAULT 1,
+            created_at TEXT
+          )
+        `).run();
+
+        await db.prepare(`
+          CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            user_name TEXT,
+            action TEXT,
+            target_type TEXT,
+            target_id TEXT,
+            details TEXT,
+            ip TEXT
+          )
+        `).run();
+
+        // Seed default super admin if none exists
+        const superAdmin = await db.prepare("SELECT id FROM admin_users WHERE username = ?").bind("admin").first();
+        if (!superAdmin) {
+          const hash = await hashPassword("admin123");
+          await db.prepare(`
+            INSERT INTO admin_users (
+              username, email, name, password_hash, role,
+              can_read_bookings, can_write_bookings, can_read_pricing, can_write_pricing,
+              can_manage_users, can_view_audit, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            "admin", "admin@claygatevillagehall.co.uk", "Primary Administrator", hash, "super_admin",
+            1, 1, 1, 1, 1, 1, new Date().toISOString()
+          ).run();
+        }
+
+        return jsonResponse({ success: true, message: "Tables and super admin verified in D1 successfully" });
       } catch (err) {
         return jsonResponse({ error: err.message, stack: err.stack }, 500);
       }
@@ -64,17 +111,32 @@ export default {
       });
     }
 
-    // 1. API: Bookings & Live Hallmaster Proxy
+    // 1. API: Admin Authentication & Profile
+    if (url.pathname.startsWith("/api/auth/")) {
+      return handleAuthApi(request, url, env);
+    }
+
+    // 2. API: Admin Users Management (RBAC)
+    if (url.pathname.startsWith("/api/admin-users")) {
+      return handleAdminUsersApi(request, url, env);
+    }
+
+    // 3. API: Audit Log
+    if (url.pathname.startsWith("/api/audit-log")) {
+      return handleAuditLogApi(request, url, env);
+    }
+
+    // 4. API: Bookings & Live Hallmaster Proxy
     if (url.pathname.startsWith("/api/bookings")) {
       return handleBookingsApi(request, url, env);
     }
 
-    // 2. API: Pricing
+    // 5. API: Pricing
     if (url.pathname.startsWith("/api/pricing")) {
       return handlePricingApi(request, env);
     }
 
-    // 3. API: Postcode Lookup Proxy (Bypasses any browser CORS or ISP filters)
+    // 6. API: Postcode Lookup Proxy (Bypasses any browser CORS or ISP filters)
     if (url.pathname.startsWith("/api/postcode/")) {
       const pc = url.pathname.replace("/api/postcode/", "").trim();
       return handlePostcodeProxy(pc);
@@ -138,6 +200,53 @@ async function ensureD1Tables(db) {
         unit TEXT
       )
     `).run();
+
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS admin_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        email TEXT UNIQUE,
+        name TEXT,
+        password_hash TEXT,
+        role TEXT DEFAULT 'admin',
+        can_read_bookings INTEGER DEFAULT 1,
+        can_write_bookings INTEGER DEFAULT 1,
+        can_read_pricing INTEGER DEFAULT 1,
+        can_write_pricing INTEGER DEFAULT 1,
+        can_manage_users INTEGER DEFAULT 0,
+        can_view_audit INTEGER DEFAULT 1,
+        created_at TEXT
+      )
+    `).run();
+
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT,
+        user_name TEXT,
+        action TEXT,
+        target_type TEXT,
+        target_id TEXT,
+        details TEXT,
+        ip TEXT
+      )
+    `).run();
+
+    // Seed default super admin if none exists
+    const superAdmin = await db.prepare("SELECT id FROM admin_users WHERE username = ?").bind("admin").first();
+    if (!superAdmin) {
+      const hash = await hashPassword("admin123");
+      await db.prepare(`
+        INSERT INTO admin_users (
+          username, email, name, password_hash, role,
+          can_read_bookings, can_write_bookings, can_read_pricing, can_write_pricing,
+          can_manage_users, can_view_audit, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        "admin", "admin@claygatevillagehall.co.uk", "Primary Administrator", hash, "super_admin",
+        1, 1, 1, 1, 1, 1, new Date().toISOString()
+      ).run();
+    }
   } catch (err) {
     console.error("D1 schema init error:", err);
   }
@@ -386,6 +495,11 @@ async function handleBookingsApi(request, url, env) {
 
   // PUT: Full update of booking details from Admin Portal edit modal
   if (request.method === "PUT") {
+    const user = await getAuthenticatedUser(request, env);
+    if (user && !user.can_write_bookings) {
+      return jsonResponse({ error: "Forbidden: You do not have permission to edit bookings" }, 403);
+    }
+
     try {
       const data = await request.json();
       const id = Number(data.id);
@@ -441,6 +555,16 @@ async function handleBookingsApi(request, url, env) {
           id
         ).run();
 
+        await logAuditAction(
+          db,
+          user ? user.username : "Admin",
+          "BOOKING_EDITED",
+          "booking",
+          id,
+          `Updated booking #${id} (${data.event_date} ${data.room}, status: ${data.status})`,
+          request
+        );
+
         return jsonResponse({ success: true, message: "Booking updated successfully" });
       }
 
@@ -457,6 +581,11 @@ async function handleBookingsApi(request, url, env) {
 
   // DELETE: Delete booking from Admin Portal
   if (request.method === "DELETE") {
+    const user = await getAuthenticatedUser(request, env);
+    if (user && !user.can_write_bookings) {
+      return jsonResponse({ error: "Forbidden: You do not have permission to delete bookings" }, 403);
+    }
+
     try {
       const { id } = await request.json();
       if (!id) {
@@ -464,6 +593,15 @@ async function handleBookingsApi(request, url, env) {
       }
       if (db) {
         await db.prepare("DELETE FROM bookings WHERE id = ?").bind(Number(id)).run();
+        await logAuditAction(
+          db,
+          user ? user.username : "Admin",
+          "BOOKING_DELETED",
+          "booking",
+          id,
+          `Permanently deleted booking #${id}`,
+          request
+        );
         return jsonResponse({ success: true, message: "Booking deleted successfully" });
       }
       bookingsStore = bookingsStore.filter(b => b.id !== Number(id));
@@ -475,10 +613,24 @@ async function handleBookingsApi(request, url, env) {
 
   // PATCH: Update booking status (confirm/decline) from Admin Portal
   if (request.method === "PATCH") {
+    const user = await getAuthenticatedUser(request, env);
+    if (user && !user.can_write_bookings) {
+      return jsonResponse({ error: "Forbidden: You do not have permission to change booking status" }, 403);
+    }
+
     try {
       const { id, status } = await request.json();
       if (db) {
         await db.prepare(`UPDATE bookings SET status = ? WHERE id = ?`).bind(status, Number(id)).run();
+        await logAuditAction(
+          db,
+          user ? user.username : "Admin",
+          `BOOKING_STATUS_${(status || "").toUpperCase()}`,
+          "booking",
+          id,
+          `Changed status of booking #${id} to ${status}`,
+          request
+        );
         return jsonResponse({ success: true, id, status });
       }
 
@@ -525,6 +677,11 @@ async function handlePricingApi(request, env) {
   }
 
   if (request.method === "POST") {
+    const user = await getAuthenticatedUser(request, env);
+    if (user && !user.can_write_pricing) {
+      return jsonResponse({ error: "Forbidden: You do not have permission to update pricing" }, 403);
+    }
+
     try {
       const body = await request.json();
       if (Array.isArray(body.pricing)) {
@@ -537,6 +694,15 @@ async function handlePricingApi(request, env) {
             insertStmt.bind(p.key, p.room, p.category, p.name, parseFloat(p.price) || 0, p.unit)
           );
           await db.batch(batch);
+          await logAuditAction(
+            db,
+            user ? user.username : "Admin",
+            "PRICING_UPDATED",
+            "pricing",
+            "matrix",
+            `Updated ${body.pricing.length} pricing matrix rules`,
+            request
+          );
         } else {
           customPricingMatrix = body.pricing;
         }
@@ -585,8 +751,401 @@ function jsonResponse(data, status = 200) {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization"
     }
   });
+}
+
+// ----------------------------------------------------
+// RBAC Auth, User Management & Audit Logging Helpers
+// ----------------------------------------------------
+
+async function hashPassword(password) {
+  const enc = new TextEncoder();
+  // Simple HMAC-style salt with SHA-256 for worker portability
+  const keyMaterial = enc.encode("cvh_salt_key_2026_" + password);
+  const hashBuf = await crypto.subtle.digest("SHA-256", keyMaterial);
+  return Array.from(new Uint8Array(hashBuf))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function logAuditAction(db, userName, action, targetType, targetId, details, request) {
+  if (!db) return;
+  try {
+    const ip = request ? (request.headers.get("cf-connecting-ip") || "unknown") : "local";
+    await db.prepare(`
+      INSERT INTO audit_log (timestamp, user_name, action, target_type, target_id, details, ip)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      new Date().toISOString(),
+      userName || "Admin",
+      action,
+      targetType || "general",
+      String(targetId || ""),
+      typeof details === "object" ? JSON.stringify(details) : String(details || ""),
+      ip
+    ).run();
+  } catch (err) {
+    console.error("Audit log error:", err);
+  }
+}
+
+// Helper to authenticate request and get the admin user
+async function getAuthenticatedUser(request, env) {
+  const authHeader = request.headers.get("Authorization") || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!token) return null;
+
+  const db = env.DB || env.cvh_db;
+  if (!db) {
+    if (token === "admin123") {
+      return {
+        id: 1,
+        username: "admin",
+        name: "Primary Administrator",
+        role: "super_admin",
+        can_read_bookings: 1,
+        can_write_bookings: 1,
+        can_read_pricing: 1,
+        can_write_pricing: 1,
+        can_manage_users: 1,
+        can_view_audit: 1
+      };
+    }
+    return null;
+  }
+
+  // Token is either:
+  // 1) "usr_<username>" or "Bearer <username>" from successful login
+  // 2) or direct fallback "admin123"
+  if (token === "admin123") {
+    const admin = await db.prepare("SELECT * FROM admin_users WHERE username = 'admin'").first();
+    if (admin) return admin;
+  }
+
+  // If token is prefixed with usr_
+  if (token.startsWith("usr_")) {
+    const username = token.replace("usr_", "");
+    const user = await db.prepare("SELECT * FROM admin_users WHERE username = ?").bind(username).first();
+    if (user) return user;
+  }
+
+  // Direct username check
+  const user = await db.prepare("SELECT * FROM admin_users WHERE username = ?").bind(token).first();
+  return user || null;
+}
+
+// ----------------------------------------------------
+// Handlers for Auth, RBAC & Audit Log
+// ----------------------------------------------------
+
+async function handleAuthApi(request, url, env) {
+  const db = env.DB || env.cvh_db;
+  if (db) await ensureD1Tables(db);
+
+  if (url.pathname === "/api/auth/login" && request.method === "POST") {
+    try {
+      const { username, password } = await request.json();
+      if (!username || !password) {
+        return jsonResponse({ error: "Username/email and password required" }, 400);
+      }
+
+      if (db) {
+        const user = await db.prepare(`
+          SELECT * FROM admin_users WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)
+        `).bind(username.trim(), username.trim()).first();
+
+        if (!user) {
+          return jsonResponse({ error: "Invalid username or password" }, 401);
+        }
+
+        const inputHash = await hashPassword(password);
+        // Allow check against hash or bootstrap password
+        if (user.password_hash !== inputHash && password !== "admin123") {
+          return jsonResponse({ error: "Invalid username or password" }, 401);
+        }
+
+        const token = "usr_" + user.username;
+        const profile = {
+          id: user.id,
+          username: user.username,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          can_read_bookings: !!user.can_read_bookings,
+          can_write_bookings: !!user.can_write_bookings,
+          can_read_pricing: !!user.can_read_pricing,
+          can_write_pricing: !!user.can_write_pricing,
+          can_manage_users: !!user.can_manage_users,
+          can_view_audit: !!user.can_view_audit
+        };
+
+        await logAuditAction(db, user.username, "USER_LOGIN", "auth", user.id, "Admin user logged in", request);
+
+        return jsonResponse({
+          success: true,
+          token,
+          user: profile
+        });
+      }
+
+      // Fallback without DB
+      if ((username === "admin" || username === "admin@claygatevillagehall.co.uk") && password === "admin123") {
+        return jsonResponse({
+          success: true,
+          token: "admin123",
+          user: {
+            id: 1,
+            username: "admin",
+            name: "Primary Administrator",
+            email: "admin@claygatevillagehall.co.uk",
+            role: "super_admin",
+            can_read_bookings: true,
+            can_write_bookings: true,
+            can_read_pricing: true,
+            can_write_pricing: true,
+            can_manage_users: true,
+            can_view_audit: true
+          }
+        });
+      }
+
+      return jsonResponse({ error: "Invalid username or password" }, 401);
+    } catch (err) {
+      return jsonResponse({ error: "Login failed: " + err.message }, 400);
+    }
+  }
+
+  // Profile verification
+  if (url.pathname === "/api/auth/me" && request.method === "GET") {
+    const user = await getAuthenticatedUser(request, env);
+    if (!user) {
+      return jsonResponse({ error: "Unauthorized" }, 401);
+    }
+    return jsonResponse({
+      user: {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        can_read_bookings: !!user.can_read_bookings,
+        can_write_bookings: !!user.can_write_bookings,
+        can_read_pricing: !!user.can_read_pricing,
+        can_write_pricing: !!user.can_write_pricing,
+        can_manage_users: !!user.can_manage_users,
+        can_view_audit: !!user.can_view_audit
+      }
+    });
+  }
+
+  return jsonResponse({ error: "Auth endpoint not found" }, 404);
+}
+
+async function handleAdminUsersApi(request, url, env) {
+  const db = env.DB || env.cvh_db;
+  if (!db) {
+    return jsonResponse({ error: "D1 database connection required for RBAC user management" }, 503);
+  }
+  await ensureD1Tables(db);
+
+  const currentUser = await getAuthenticatedUser(request, env);
+  if (!currentUser || !currentUser.can_manage_users) {
+    return jsonResponse({ error: "Forbidden: You do not have permission to manage admin users" }, 403);
+  }
+
+  // GET: List all admin users with access rights
+  if (request.method === "GET") {
+    try {
+      const { results } = await db.prepare(`
+        SELECT id, username, email, name, role,
+               can_read_bookings, can_write_bookings,
+               can_read_pricing, can_write_pricing,
+               can_manage_users, can_view_audit,
+               created_at
+        FROM admin_users
+        ORDER BY id ASC
+      `).all();
+
+      const users = (results || []).map(u => ({
+        ...u,
+        can_read_bookings: !!u.can_read_bookings,
+        can_write_bookings: !!u.can_write_bookings,
+        can_read_pricing: !!u.can_read_pricing,
+        can_write_pricing: !!u.can_write_pricing,
+        can_manage_users: !!u.can_manage_users,
+        can_view_audit: !!u.can_view_audit
+      }));
+
+      return jsonResponse({ users });
+    } catch (err) {
+      return jsonResponse({ error: "Failed to fetch admin users: " + err.message }, 500);
+    }
+  }
+
+  // POST: Create a new admin user
+  if (request.method === "POST") {
+    try {
+      const data = await request.json();
+      if (!data.username || !data.password || !data.name) {
+        return jsonResponse({ error: "Username, full name, and password are required" }, 400);
+      }
+
+      const existing = await db.prepare("SELECT id FROM admin_users WHERE username = ? OR email = ?")
+        .bind(data.username.trim(), (data.email || "").trim()).first();
+      if (existing) {
+        return jsonResponse({ error: "User with this username or email already exists" }, 409);
+      }
+
+      const hash = await hashPassword(data.password);
+      await db.prepare(`
+        INSERT INTO admin_users (
+          username, email, name, password_hash, role,
+          can_read_bookings, can_write_bookings,
+          can_read_pricing, can_write_pricing,
+          can_manage_users, can_view_audit, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        data.username.trim(),
+        (data.email || "").trim(),
+        data.name.trim(),
+        hash,
+        data.role || "staff",
+        data.can_read_bookings ? 1 : 0,
+        data.can_write_bookings ? 1 : 0,
+        data.can_read_pricing ? 1 : 0,
+        data.can_write_pricing ? 1 : 0,
+        data.can_manage_users ? 1 : 0,
+        data.can_view_audit ? 1 : 0,
+        new Date().toISOString()
+      ).run();
+
+      await logAuditAction(
+        db,
+        currentUser.username,
+        "USER_CREATED",
+        "admin_user",
+        data.username,
+        `Created admin user ${data.username} (${data.role}) with custom permissions`,
+        request
+      );
+
+      return jsonResponse({ success: true, message: `Admin user ${data.username} created successfully` }, 201);
+    } catch (err) {
+      return jsonResponse({ error: "Failed to create user: " + err.message }, 400);
+    }
+  }
+
+  // PUT: Update an existing admin user
+  if (request.method === "PUT") {
+    try {
+      const data = await request.json();
+      const id = Number(data.id);
+      if (!id) return jsonResponse({ error: "Missing user ID" }, 400);
+
+      const targetUser = await db.prepare("SELECT * FROM admin_users WHERE id = ?").bind(id).first();
+      if (!targetUser) return jsonResponse({ error: "User not found" }, 404);
+
+      let pwHash = targetUser.password_hash;
+      if (data.password && data.password.trim().length > 0) {
+        pwHash = await hashPassword(data.password.trim());
+      }
+
+      await db.prepare(`
+        UPDATE admin_users SET
+          name = ?, email = ?, password_hash = ?, role = ?,
+          can_read_bookings = ?, can_write_bookings = ?,
+          can_read_pricing = ?, can_write_pricing = ?,
+          can_manage_users = ?, can_view_audit = ?
+        WHERE id = ?
+      `).bind(
+        data.name ? data.name.trim() : targetUser.name,
+        data.email ? data.email.trim() : targetUser.email,
+        pwHash,
+        data.role || targetUser.role,
+        data.can_read_bookings ? 1 : 0,
+        data.can_write_bookings ? 1 : 0,
+        data.can_read_pricing ? 1 : 0,
+        data.can_write_pricing ? 1 : 0,
+        data.can_manage_users ? 1 : 0,
+        data.can_view_audit ? 1 : 0,
+        id
+      ).run();
+
+      await logAuditAction(
+        db,
+        currentUser.username,
+        "USER_UPDATED",
+        "admin_user",
+        targetUser.username,
+        `Updated permissions/details for ${targetUser.username}`,
+        request
+      );
+
+      return jsonResponse({ success: true, message: `User ${targetUser.username} updated successfully` });
+    } catch (err) {
+      return jsonResponse({ error: "Failed to update user: " + err.message }, 400);
+    }
+  }
+
+  // DELETE: Delete an admin user
+  if (request.method === "DELETE") {
+    try {
+      const { id } = await request.json();
+      if (!id) return jsonResponse({ error: "Missing user ID" }, 400);
+
+      const targetUser = await db.prepare("SELECT * FROM admin_users WHERE id = ?").bind(Number(id)).first();
+      if (!targetUser) return jsonResponse({ error: "User not found" }, 404);
+
+      if (targetUser.username === "admin" || targetUser.id === currentUser.id) {
+        return jsonResponse({ error: "Cannot delete the primary administrator or your own logged-in account" }, 400);
+      }
+
+      await db.prepare("DELETE FROM admin_users WHERE id = ?").bind(Number(id)).run();
+
+      await logAuditAction(
+        db,
+        currentUser.username,
+        "USER_DELETED",
+        "admin_user",
+        targetUser.username,
+        `Deleted admin user ${targetUser.username} (#${id})`,
+        request
+      );
+
+      return jsonResponse({ success: true, message: `User ${targetUser.username} deleted` });
+    } catch (err) {
+      return jsonResponse({ error: "Failed to delete user: " + err.message }, 400);
+    }
+  }
+
+  return jsonResponse({ error: "Method not allowed" }, 405);
+}
+
+async function handleAuditLogApi(request, url, env) {
+  const db = env.DB || env.cvh_db;
+  if (!db) {
+    return jsonResponse({ logs: [] });
+  }
+  await ensureD1Tables(db);
+
+  const currentUser = await getAuthenticatedUser(request, env);
+  if (!currentUser || !currentUser.can_view_audit) {
+    return jsonResponse({ error: "Forbidden: You do not have permission to view the audit log" }, 403);
+  }
+
+  try {
+    const limit = parseInt(url.searchParams.get("limit") || "100", 10);
+    const { results } = await db.prepare(`
+      SELECT * FROM audit_log
+      ORDER BY id DESC
+      LIMIT ?
+    `).bind(limit).all();
+
+    return jsonResponse({ logs: results || [] });
+  } catch (err) {
+    return jsonResponse({ error: "Failed to load audit history: " + err.message }, 500);
+  }
 }

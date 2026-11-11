@@ -1,7 +1,15 @@
-// Admin Dashboard Logic: Bookings & Pricing Administration
+// Admin Dashboard Logic: Bookings, Pricing, Users RBAC & Audit History
 let token = sessionStorage.getItem("cvh_admin_token") || "";
+let currentUser = null;
 let currentPricingList = [];
 let loadedBookings = [];
+
+try {
+  const cachedUser = sessionStorage.getItem("cvh_admin_user");
+  if (cachedUser) currentUser = JSON.parse(cachedUser);
+} catch (e) {
+  currentUser = null;
+}
 
 // Room sort weight priority
 const ROOM_ORDER = {
@@ -26,6 +34,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const addPriceCard = document.getElementById("addPriceCard");
   const addPriceForm = document.getElementById("addPriceForm");
 
+  // User management elements
+  const toggleAddUserBtn = document.getElementById("toggleAddUserBtn");
+  const addUserCard = document.getElementById("addUserCard");
+  const adminUserForm = document.getElementById("adminUserForm");
+  const cancelUserFormBtn = document.getElementById("cancelUserFormBtn");
+  const refreshAuditBtn = document.getElementById("refreshAuditBtn");
+
   // Tab switching
   const tabBtns = document.querySelectorAll(".admin-tab-btn");
   tabBtns.forEach(btn => {
@@ -33,8 +48,13 @@ document.addEventListener("DOMContentLoaded", () => {
       tabBtns.forEach(b => b.classList.remove("active"));
       document.querySelectorAll(".admin-tab-pane").forEach(p => p.classList.remove("active"));
       btn.classList.add("active");
-      const target = document.getElementById(btn.getAttribute("data-tab"));
+      const targetId = btn.getAttribute("data-tab");
+      const target = document.getElementById(targetId);
       if (target) target.classList.add("active");
+
+      // Auto load tab data
+      if (targetId === "tab-users") loadAdminUsers();
+      if (targetId === "tab-audit") loadAuditLog();
     });
   });
 
@@ -42,27 +62,58 @@ document.addEventListener("DOMContentLoaded", () => {
     showDashboard();
   }
 
-  loginForm.addEventListener("submit", (e) => {
+  // Handle Login form
+  loginForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const secret = document.getElementById("adminSecret").value.trim();
-    if (!secret) return;
+    const loginAlert = document.getElementById("loginAlert");
+    loginAlert.style.display = "none";
 
-    token = secret;
-    sessionStorage.setItem("cvh_admin_token", token);
-    showDashboard();
+    const username = document.getElementById("adminUsername").value.trim();
+    const password = document.getElementById("adminPassword").value;
+    if (!username || !password) return;
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        loginAlert.textContent = data.error || "Invalid username or password";
+        loginAlert.style.display = "block";
+        return;
+      }
+
+      token = data.token;
+      currentUser = data.user;
+      sessionStorage.setItem("cvh_admin_token", token);
+      sessionStorage.setItem("cvh_admin_user", JSON.stringify(currentUser));
+      showDashboard();
+    } catch (err) {
+      loginAlert.textContent = "Sign in error: " + err.message;
+      loginAlert.style.display = "block";
+    }
   });
 
   logoutBtn.addEventListener("click", () => {
     sessionStorage.removeItem("cvh_admin_token");
+    sessionStorage.removeItem("cvh_admin_user");
     token = "";
+    currentUser = null;
     loginCard.style.display = "block";
     dashboardSection.style.display = "none";
     logoutBtn.style.display = "none";
+    document.getElementById("userBadgeItem").style.display = "none";
   });
 
   refreshBtn.addEventListener("click", () => { loadBookings(); loadPricing(); });
   filterStatus.addEventListener("change", () => loadBookings());
   savePricesBtn.addEventListener("click", () => savePricing());
+
+  if (refreshAuditBtn) {
+    refreshAuditBtn.addEventListener("click", () => loadAuditLog());
+  }
 
   // Toggle add price card
   if (toggleAddPriceBtn) {
@@ -83,10 +134,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const unit = document.getElementById("newPriceUnit").value;
       const rate = parseFloat(document.getElementById("newPriceRate").value) || 0.0;
 
-      // Unique key: facility + type of booking
       const key = `${room}_${category}`;
-
-      // Check if rule already exists, update or add
       const existingIdx = currentPricingList.findIndex(item => item.key === key);
       const newRule = {
         key: key,
@@ -103,13 +151,9 @@ document.addEventListener("DOMContentLoaded", () => {
         currentPricingList.push(newRule);
       }
 
-      // Always sort by room type
       sortPricingList(currentPricingList);
-
-      // Re-render table
       renderPricingTable(currentPricingList);
 
-      // Reset & hide form
       addPriceForm.reset();
       addPriceCard.style.display = "none";
       if (toggleAddPriceBtn) toggleAddPriceBtn.textContent = "➕ Add New Price Rule";
@@ -121,22 +165,158 @@ document.addEventListener("DOMContentLoaded", () => {
       setTimeout(() => { notice.style.display = "none"; }, 3500);
     });
   }
+
+  // User management triggers
+  if (toggleAddUserBtn) {
+    toggleAddUserBtn.addEventListener("click", () => {
+      resetUserForm();
+      const isHidden = addUserCard.style.display === "none";
+      addUserCard.style.display = isHidden ? "block" : "none";
+      toggleAddUserBtn.textContent = isHidden ? "✕ Close Form" : "➕ Add New Admin User";
+    });
+  }
+
+  if (cancelUserFormBtn) {
+    cancelUserFormBtn.addEventListener("click", () => {
+      resetUserForm();
+      addUserCard.style.display = "none";
+      if (toggleAddUserBtn) toggleAddUserBtn.textContent = "➕ Add New Admin User";
+    });
+  }
+
+  if (adminUserForm) {
+    adminUserForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await handleSaveAdminUser();
+    });
+  }
+
+  // Pre-fill permissions when selecting role preset
+  const roleSelect = document.getElementById("newAdminRole");
+  if (roleSelect) {
+    roleSelect.addEventListener("change", () => {
+      applyRolePreset(roleSelect.value);
+    });
+  }
 });
+
+function applyRolePreset(role) {
+  const rBook = document.getElementById("permReadBookings");
+  const wBook = document.getElementById("permWriteBookings");
+  const rPrice = document.getElementById("permReadPricing");
+  const wPrice = document.getElementById("permWritePricing");
+  const mUser = document.getElementById("permManageUsers");
+  const vAudit = document.getElementById("permViewAudit");
+
+  if (role === "admin") {
+    rBook.checked = true; wBook.checked = true;
+    rPrice.checked = true; wPrice.checked = true;
+    mUser.checked = true; vAudit.checked = true;
+  } else if (role === "manager") {
+    rBook.checked = true; wBook.checked = true;
+    rPrice.checked = true; wPrice.checked = false;
+    mUser.checked = false; vAudit.checked = true;
+  } else if (role === "accountant") {
+    rBook.checked = true; wBook.checked = false;
+    rPrice.checked = true; wPrice.checked = true;
+    mUser.checked = false; vAudit.checked = true;
+  } else if (role === "auditor") {
+    rBook.checked = true; wBook.checked = false;
+    rPrice.checked = true; wPrice.checked = false;
+    mUser.checked = false; vAudit.checked = true;
+  }
+}
 
 async function showDashboard() {
   document.getElementById("loginCard").style.display = "none";
   document.getElementById("dashboardSection").style.display = "block";
   document.getElementById("logoutBtn").style.display = "inline-block";
-  await loadBookings();
-  await loadPricing();
+
+  // Verify/refresh user profile from server
+  try {
+    const res = await fetch("/api/auth/me", {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      currentUser = data.user;
+      sessionStorage.setItem("cvh_admin_user", JSON.stringify(currentUser));
+    }
+  } catch (e) {
+    // continue with cached currentUser
+  }
+
+  // Update header badge
+  if (currentUser) {
+    const badgeItem = document.getElementById("userBadgeItem");
+    const displaySpan = document.getElementById("loggedInUserDisplay");
+    badgeItem.style.display = "flex";
+    displaySpan.textContent = `👤 ${currentUser.name} (${currentUser.role || 'Admin'})`;
+
+    // Apply RBAC UI gating
+    applyRBACUI(currentUser);
+  }
+
+  // Load initial tab data
+  if (!currentUser || currentUser.can_read_bookings) {
+    await loadBookings();
+  }
+  if (!currentUser || currentUser.can_read_pricing) {
+    await loadPricing();
+  }
 }
+
+function applyRBACUI(user) {
+  if (!user) return;
+
+  // Bookings Tab
+  const navBookings = document.getElementById("navTabBookings");
+  if (!user.can_read_bookings) {
+    if (navBookings) navBookings.style.display = "none";
+  } else {
+    if (navBookings) navBookings.style.display = "inline-block";
+  }
+
+  // Pricing Tab
+  const navPricing = document.getElementById("navTabPricing");
+  if (!user.can_read_pricing) {
+    if (navPricing) navPricing.style.display = "none";
+  } else {
+    if (navPricing) navPricing.style.display = "inline-block";
+  }
+
+  // Pricing Write Permissions
+  const savePricesBtn = document.getElementById("savePricesBtn");
+  const toggleAddPriceBtn = document.getElementById("toggleAddPriceBtn");
+  if (savePricesBtn) savePricesBtn.style.display = user.can_write_pricing ? "inline-block" : "none";
+  if (toggleAddPriceBtn) toggleAddPriceBtn.style.display = user.can_write_pricing ? "inline-block" : "none";
+
+  // Users Tab
+  const navUsers = document.getElementById("navTabUsers");
+  if (!user.can_manage_users) {
+    if (navUsers) navUsers.style.display = "none";
+  } else {
+    if (navUsers) navUsers.style.display = "inline-block";
+  }
+
+  // Audit Tab
+  const navAudit = document.getElementById("navTabAudit");
+  if (!user.can_view_audit) {
+    if (navAudit) navAudit.style.display = "none";
+  } else {
+    if (navAudit) navAudit.style.display = "inline-block";
+  }
+}
+
+// ----------------------------------------------------
+// Bookings Logic
+// ----------------------------------------------------
 
 async function loadBookings() {
   const tbody = document.getElementById("bookingsTableBody");
-  const notice = document.getElementById("statusNotice");
   const filter = document.getElementById("filterStatus").value;
 
-  tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 2rem;">Loading bookings...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding: 2rem;">Loading bookings...</td></tr>`;
 
   try {
     const url = `/api/bookings${filter ? `?status=${filter}` : ""}`;
@@ -149,7 +329,7 @@ async function loadBookings() {
     if (!res.ok) {
       if (res.status === 401) {
         sessionStorage.removeItem("cvh_admin_token");
-        alert("Unauthorized secret key. Please log in again.");
+        alert("Session expired or unauthorized. Please log in again.");
         location.reload();
         return;
       }
@@ -163,12 +343,22 @@ async function loadBookings() {
       return;
     }
 
+    const canWrite = !currentUser || currentUser.can_write_bookings;
+
     tbody.innerHTML = bookings.map(b => {
-      // Build address presentation
       let addrText = b.address || "";
       if (!addrText && (b.address_line1 || b.address_city || b.address_postcode)) {
         addrText = [b.address_line1, b.address_city, b.address_postcode].filter(Boolean).join(", ");
       }
+
+      const actionsHtml = canWrite ? `
+        <div style="display:flex; flex-direction:column; gap:0.35rem;">
+          <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.6rem; font-size:0.78rem;" onclick="openEditBookingModal(${b.id})">✏️ Edit</button>
+          ${b.status !== 'confirmed' ? `<button class="btn btn-sm btn-primary" style="padding:0.25rem 0.6rem; font-size:0.78rem;" onclick="updateStatus(${b.id}, 'confirmed')">Confirm</button>` : ''}
+          ${b.status !== 'pending' ? `<button class="btn btn-sm btn-outline" style="padding:0.25rem 0.6rem; font-size:0.78rem; color:#b45309; border-color:#fde68a;" onclick="updateStatus(${b.id}, 'pending')">Mark Pending</button>` : ''}
+          ${b.status !== 'declined' ? `<button class="btn btn-sm btn-outline" style="padding:0.25rem 0.6rem; font-size:0.78rem; color:#b91c1c; border-color:#fecaca;" onclick="updateStatus(${b.id}, 'declined')">Decline</button>` : ''}
+        </div>
+      ` : `<span style="color:var(--text-muted); font-size:0.8rem;">Read-only</span>`;
 
       return `
       <tr>
@@ -213,14 +403,7 @@ async function loadBookings() {
         <td>
           <span class="status-tag status-${b.status.toLowerCase()}">${escapeHtml(b.status)}</span>
         </td>
-        <td>
-          <div style="display:flex; flex-direction:column; gap:0.35rem;">
-            <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.6rem; font-size:0.78rem;" onclick="openEditBookingModal(${b.id})">✏️ Edit</button>
-            ${b.status !== 'confirmed' ? `<button class="btn btn-sm btn-primary" style="padding:0.25rem 0.6rem; font-size:0.78rem;" onclick="updateStatus(${b.id}, 'confirmed')">Confirm</button>` : ''}
-            ${b.status !== 'pending' ? `<button class="btn btn-sm btn-outline" style="padding:0.25rem 0.6rem; font-size:0.78rem; color:#b45309; border-color:#fde68a;" onclick="updateStatus(${b.id}, 'pending')">Mark Pending</button>` : ''}
-            ${b.status !== 'declined' ? `<button class="btn btn-sm btn-outline" style="padding:0.25rem 0.6rem; font-size:0.78rem; color:#b91c1c; border-color:#fecaca;" onclick="updateStatus(${b.id}, 'declined')">Decline</button>` : ''}
-          </div>
-        </td>
+        <td>${actionsHtml}</td>
       </tr>
       `;
     }).join("");
@@ -230,7 +413,36 @@ async function loadBookings() {
   }
 }
 
-// Sort pricing list always by room type order, then category
+async function updateStatus(id, newStatus) {
+  try {
+    const res = await fetch("/api/bookings", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ id, status: newStatus })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to update status");
+
+    const notice = document.getElementById("statusNotice");
+    notice.className = "alert alert-success";
+    notice.textContent = `Booking #${id} status successfully updated to "${newStatus}".`;
+    notice.style.display = "block";
+    setTimeout(() => { notice.style.display = "none"; }, 4000);
+
+    loadBookings();
+  } catch (err) {
+    alert("Error updating status: " + err.message);
+  }
+}
+
+// ----------------------------------------------------
+// Pricing Matrix Logic
+// ----------------------------------------------------
+
 function sortPricingList(list) {
   list.sort((a, b) => {
     const orderA = ROOM_ORDER[a.room] || 99;
@@ -249,98 +461,86 @@ async function loadPricing() {
     const data = await res.json();
     let list = data.pricing || [];
 
-    // Ensure room and category exist on each row
-    list = list.map(item => {
-      let room = item.room;
-      let category = item.category;
-
-      if (!room) {
-        if (item.key.includes("main_hall")) room = "main_hall";
-        else if (item.key.includes("small_hall")) room = "small_hall";
-        else if (item.key.includes("committee_room")) room = "committee_room";
-        else if (item.key.includes("entire_venue")) room = "entire_venue";
-        else if (item.key.includes("stage")) room = "stage_av";
-        else if (item.key.includes("kitchen")) room = "kitchen_commercial";
-        else if (item.key.includes("deposit")) room = "deposit";
-        else room = "other";
-      }
-
-      if (!category || category === "room_rate" || category === "addon" || category === "deposit") {
-        category = "all";
-      }
-
-      return {
-        ...item,
-        room: room,
-        category: category
-      };
-    });
-
     sortPricingList(list);
     currentPricingList = list;
-    renderPricingTable(currentPricingList);
-
+    renderPricingTable(list);
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--danger); padding:1rem;">Failed to load pricing: ${err.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 1.5rem; color: var(--danger);">${err.message}</td></tr>`;
   }
 }
 
 function renderPricingTable(list) {
   const tbody = document.getElementById("pricingTableBody");
+  const canWrite = !currentUser || currentUser.can_write_pricing;
 
-  if (list.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2rem; color:var(--text-muted);">No pricing rules configured. Click "Add New Price Rule" above.</td></tr>`;
-    return;
-  }
+  tbody.innerHTML = list.map((item, index) => {
+    const isPerEvent = item.unit === "per_event";
+    const isFlat = item.unit === "flat";
+    const unitLabel = isPerEvent ? "Per Event" : isFlat ? "Flat Deposit" : "Per Hour";
 
-  tbody.innerHTML = list.map((item, idx) => `
-    <tr>
+    return `
+    <tr data-key="${escapeHtml(item.key)}">
       <td>
-        <span class="badge ${getRoomBadgeClass(item.room)}" style="font-size:0.78rem;">
-          ${formatRoom(item.room)}
-        </span>
+        <span class="badge ${getRoomBadgeClass(item.room)}" style="font-size:0.8rem;">${formatRoom(item.room)}</span>
       </td>
       <td>
-        <strong>${formatCategory(item.category)}</strong>
+        <strong style="color:#1e293b; font-size:0.9rem;">${formatCategory(item.category)}</strong>
       </td>
       <td>
-        <span style="font-weight:600; color:#1e293b;">${escapeHtml(item.name)}</span>
-        <br><small style="color:var(--text-muted); font-family:monospace; font-size:0.75rem;">Key: ${escapeHtml(item.key)}</small>
+        ${canWrite ? `
+          <input type="text" class="form-control" style="font-size:0.88rem; padding:0.35rem 0.6rem;" 
+            value="${escapeHtml(item.name)}" 
+            onchange="updatePricingField('${item.key}', 'name', this.value)">
+        ` : `<span>${escapeHtml(item.name)}</span>`}
       </td>
       <td>
-        ${escapeHtml((item.unit || "per_hour").replace("_", " "))}
+        ${canWrite ? `
+          <select class="form-control" style="font-size:0.85rem; padding:0.35rem 0.5rem;" 
+            onchange="updatePricingField('${item.key}', 'unit', this.value)">
+            <option value="per_hour" ${item.unit === 'per_hour' ? 'selected' : ''}>Per Hour</option>
+            <option value="per_event" ${item.unit === 'per_event' ? 'selected' : ''}>Per Event</option>
+            <option value="flat" ${item.unit === 'flat' ? 'selected' : ''}>Flat Deposit</option>
+          </select>
+        ` : `<span>${unitLabel}</span>`}
       </td>
       <td>
-        £ <input type="number" step="0.50" min="0" class="price-input" data-index="${idx}" data-key="${item.key}" value="${parseFloat(item.price).toFixed(2)}">
+        ${canWrite ? `
+          <div style="display:flex; align-items:center; gap:0.25rem;">
+            <span style="font-weight:700;">£</span>
+            <input type="number" step="0.50" min="0" class="form-control" 
+              style="width: 95px; font-weight:700; font-size:0.95rem; color:#166534;" 
+              value="${(parseFloat(item.price) || 0).toFixed(2)}" 
+              onchange="updatePricingField('${item.key}', 'price', parseFloat(this.value) || 0)">
+          </div>
+        ` : `<strong style="color:#166534;">£${(parseFloat(item.price) || 0).toFixed(2)}</strong>`}
       </td>
       <td style="text-align:center;">
-        <button type="button" class="btn btn-outline btn-sm" style="color:#b91c1c; border-color:#fecaca; padding:0.25rem 0.55rem; font-size:0.75rem;" onclick="removePricingRow(${idx})">✕</button>
+        ${canWrite ? `
+          <button type="button" class="btn btn-outline btn-sm" style="color:var(--danger); border-color:#fecaca; padding:0.2rem 0.5rem;" 
+            onclick="removePricingRule('${item.key}')" title="Delete rule">✕</button>
+        ` : `<span style="color:var(--text-muted);">-</span>`}
       </td>
     </tr>
-  `).join("");
+    `;
+  }).join("");
 }
 
-function removePricingRow(idx) {
-  const item = currentPricingList[idx];
-  if (!confirm(`Delete price rule "${item.name}"?`)) return;
-  currentPricingList.splice(idx, 1);
-  sortPricingList(currentPricingList);
+window.updatePricingField = function(key, field, val) {
+  const item = currentPricingList.find(p => p.key === key);
+  if (item) {
+    item[field] = val;
+  }
+};
+
+window.removePricingRule = function(key) {
+  if (!confirm(`Delete pricing rule for ${key}?`)) return;
+  currentPricingList = currentPricingList.filter(p => p.key !== key);
   renderPricingTable(currentPricingList);
-}
+};
 
 async function savePricing() {
   const notice = document.getElementById("pricingNotice");
   const saveBtn = document.getElementById("savePricesBtn");
-  const inputs = document.querySelectorAll(".price-input");
-
-  // Update rates from inputs
-  inputs.forEach(inp => {
-    const idx = parseInt(inp.getAttribute("data-index"), 10);
-    if (!isNaN(idx) && currentPricingList[idx]) {
-      currentPricingList[idx].price = parseFloat(inp.value) || 0.0;
-    }
-  });
-
   saveBtn.disabled = true;
   saveBtn.textContent = "Saving...";
 
@@ -353,19 +553,16 @@ async function savePricing() {
       },
       body: JSON.stringify({ pricing: currentPricingList })
     });
-
     const data = await res.json();
-    if (res.ok && data.success) {
-      notice.className = "alert alert-success";
-      notice.textContent = "Pricing configuration successfully updated! All new public inquiries will use these rates.";
-      notice.style.display = "block";
-      setTimeout(() => { notice.style.display = "none"; }, 4000);
-    } else {
-      throw new Error(data.error || "Failed to update pricing");
-    }
+    if (!res.ok) throw new Error(data.error || "Failed to save prices");
+
+    notice.className = "alert alert-success";
+    notice.textContent = "Pricing configuration successfully saved and published!";
+    notice.style.display = "block";
+    setTimeout(() => { notice.style.display = "none"; }, 4000);
   } catch (err) {
     notice.className = "alert alert-error";
-    notice.textContent = "Error saving prices: " + err.message;
+    notice.textContent = "Save failed: " + err.message;
     notice.style.display = "block";
   } finally {
     saveBtn.disabled = false;
@@ -373,29 +570,272 @@ async function savePricing() {
   }
 }
 
-async function updateStatus(id, newStatus) {
-  if (!confirm(`Are you sure you want to mark booking #${id} as ${newStatus}?`)) return;
+// ----------------------------------------------------
+// Tab 3: Admin Users & RBAC Management
+// ----------------------------------------------------
+
+let loadedAdminUsers = [];
+
+async function loadAdminUsers() {
+  const tbody = document.getElementById("usersTableBody");
+  tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 2rem;">Loading admin users...</td></tr>`;
 
   try {
-    const res = await fetch("/api/bookings", {
-      method: "PATCH",
+    const res = await fetch("/api/admin-users", {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load users");
+
+    const users = data.users || [];
+    loadedAdminUsers = users;
+
+    if (users.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 2rem; color: var(--text-muted);">No users found.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = users.map(u => {
+      const perms = [];
+      if (u.can_read_bookings) perms.push('<span class="badge badge-blue">Read Bookings</span>');
+      if (u.can_write_bookings) perms.push('<span class="badge badge-green">Edit Bookings</span>');
+      if (u.can_read_pricing) perms.push('<span class="badge badge-blue">Read Pricing</span>');
+      if (u.can_write_pricing) perms.push('<span class="badge badge-amber">Edit Pricing</span>');
+      if (u.can_manage_users) perms.push('<span class="badge badge-committee">Manage Users</span>');
+      if (u.can_view_audit) perms.push('<span class="badge badge-small">View Audit</span>');
+
+      const isPrimary = u.username === "admin";
+
+      return `
+      <tr>
+        <td>
+          <strong style="color:var(--primary); font-size:0.95rem;">${escapeHtml(u.username)}</strong>
+          <div style="font-size:0.85rem; color:#475569;">${escapeHtml(u.name)}</div>
+        </td>
+        <td>
+          <a href="mailto:${escapeHtml(u.email || '')}" style="color:var(--text-dark);">${escapeHtml(u.email || '-')}</a>
+        </td>
+        <td>
+          <span class="badge ${u.role === 'super_admin' || u.role === 'admin' ? 'badge-main' : 'badge-amber'}" style="font-size:0.75rem;">
+            ${escapeHtml(u.role)}
+          </span>
+        </td>
+        <td>
+          <div style="display:flex; flex-wrap:wrap; gap:0.3rem;">
+            ${perms.join("")}
+          </div>
+        </td>
+        <td style="text-align:center;">
+          <div style="display:flex; gap:0.35rem; justify-content:center;">
+            <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem;" onclick="openEditUserForm(${u.id})">✏️ Edit</button>
+            ${!isPrimary ? `
+              <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem; color:#b91c1c; border-color:#fecaca;" onclick="deleteAdminUser(${u.id}, '${escapeHtml(u.username)}')">🗑️</button>
+            ` : ''}
+          </div>
+        </td>
+      </tr>
+      `;
+    }).join("");
+
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 2rem; color: var(--danger);">${err.message}</td></tr>`;
+  }
+}
+
+function resetUserForm() {
+  document.getElementById("manageUserId").value = "";
+  document.getElementById("userFormTitle").textContent = "➕ Add New Admin User";
+  document.getElementById("newAdminUsername").value = "";
+  document.getElementById("newAdminUsername").disabled = false;
+  document.getElementById("newAdminName").value = "";
+  document.getElementById("newAdminEmail").value = "";
+  document.getElementById("newAdminPassword").value = "";
+  document.getElementById("newAdminPassword").required = true;
+  document.getElementById("pwdOptionalNotice").textContent = "(Required for new users)";
+  document.getElementById("newAdminRole").value = "staff";
+
+  document.getElementById("permReadBookings").checked = true;
+  document.getElementById("permWriteBookings").checked = true;
+  document.getElementById("permReadPricing").checked = true;
+  document.getElementById("permWritePricing").checked = false;
+  document.getElementById("permManageUsers").checked = false;
+  document.getElementById("permViewAudit").checked = true;
+}
+
+window.openEditUserForm = function(userId) {
+  const user = loadedAdminUsers.find(u => u.id === userId);
+  if (!user) return;
+
+  const card = document.getElementById("addUserCard");
+  const toggleBtn = document.getElementById("toggleAddUserBtn");
+  card.style.display = "block";
+  toggleBtn.textContent = "✕ Close Form";
+
+  document.getElementById("manageUserId").value = user.id;
+  document.getElementById("userFormTitle").textContent = `✏️ Edit Admin User: ${user.username}`;
+  document.getElementById("newAdminUsername").value = user.username;
+  document.getElementById("newAdminUsername").disabled = true;
+  document.getElementById("newAdminName").value = user.name || "";
+  document.getElementById("newAdminEmail").value = user.email || "";
+  document.getElementById("newAdminPassword").value = "";
+  document.getElementById("newAdminPassword").required = false;
+  document.getElementById("pwdOptionalNotice").textContent = "(Leave blank to keep existing password)";
+  document.getElementById("newAdminRole").value = user.role || "staff";
+
+  document.getElementById("permReadBookings").checked = !!user.can_read_bookings;
+  document.getElementById("permWriteBookings").checked = !!user.can_write_bookings;
+  document.getElementById("permReadPricing").checked = !!user.can_read_pricing;
+  document.getElementById("permWritePricing").checked = !!user.can_write_pricing;
+  document.getElementById("permManageUsers").checked = !!user.can_manage_users;
+  document.getElementById("permViewAudit").checked = !!user.can_view_audit;
+
+  card.scrollIntoView({ behavior: "smooth" });
+};
+
+async function handleSaveAdminUser() {
+  const id = document.getElementById("manageUserId").value;
+  const username = document.getElementById("newAdminUsername").value.trim();
+  const name = document.getElementById("newAdminName").value.trim();
+  const email = document.getElementById("newAdminEmail").value.trim();
+  const password = document.getElementById("newAdminPassword").value;
+  const role = document.getElementById("newAdminRole").value;
+
+  const payload = {
+    username,
+    name,
+    email,
+    password,
+    role,
+    can_read_bookings: document.getElementById("permReadBookings").checked,
+    can_write_bookings: document.getElementById("permWriteBookings").checked,
+    can_read_pricing: document.getElementById("permReadPricing").checked,
+    can_write_pricing: document.getElementById("permWritePricing").checked,
+    can_manage_users: document.getElementById("permManageUsers").checked,
+    can_view_audit: document.getElementById("permViewAudit").checked
+  };
+
+  const isEdit = Boolean(id);
+  if (isEdit) payload.id = Number(id);
+
+  const saveBtn = document.getElementById("saveUserBtn");
+  saveBtn.disabled = true;
+  saveBtn.textContent = "Saving...";
+
+  try {
+    const res = await fetch("/api/admin-users", {
+      method: isEdit ? "PUT" : "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${token}`
       },
-      body: JSON.stringify({ id, status: newStatus })
+      body: JSON.stringify(payload)
     });
-
     const data = await res.json();
-    if (res.ok && data.success) {
-      loadBookings();
-    } else {
-      alert("Error updating status: " + (data.error || "Unknown error"));
-    }
+    if (!res.ok) throw new Error(data.error || "Save user failed");
+
+    const notice = document.getElementById("userNotice");
+    notice.className = "alert alert-success";
+    notice.textContent = data.message || `User ${username} saved successfully!`;
+    notice.style.display = "block";
+    setTimeout(() => { notice.style.display = "none"; }, 4000);
+
+    resetUserForm();
+    document.getElementById("addUserCard").style.display = "none";
+    document.getElementById("toggleAddUserBtn").textContent = "➕ Add New Admin User";
+    await loadAdminUsers();
   } catch (err) {
-    alert("Network error: " + err.message);
+    alert("Error: " + err.message);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "Save Admin User";
   }
 }
+
+window.deleteAdminUser = async function(userId, username) {
+  if (!confirm(`Are you sure you want to delete admin account "${username}"?`)) return;
+
+  try {
+    const res = await fetch("/api/admin-users", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ id: userId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Delete failed");
+
+    const notice = document.getElementById("userNotice");
+    notice.className = "alert alert-success";
+    notice.textContent = `User ${username} deleted successfully.`;
+    notice.style.display = "block";
+    setTimeout(() => { notice.style.display = "none"; }, 3500);
+
+    await loadAdminUsers();
+  } catch (err) {
+    alert("Error deleting user: " + err.message);
+  }
+};
+
+// ----------------------------------------------------
+// Tab 4: Audit History Log
+// ----------------------------------------------------
+
+async function loadAuditLog() {
+  const tbody = document.getElementById("auditTableBody");
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2rem;">Loading audit trail...</td></tr>`;
+
+  try {
+    const res = await fetch("/api/audit-log", {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load audit history");
+
+    const logs = data.logs || [];
+    if (logs.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2.5rem; color: var(--text-muted);">No activity recorded yet. System changes and user logins will be logged here.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = logs.map(l => {
+      const dateFormatted = l.timestamp ? new Date(l.timestamp).toLocaleString("en-GB") : "-";
+      return `
+      <tr>
+        <td style="font-size:0.8rem; color:#475569; white-space:nowrap;">${dateFormatted}</td>
+        <td><strong style="color:var(--primary); font-size:0.88rem;">${escapeHtml(l.user_name)}</strong></td>
+        <td>
+          <span class="badge ${getAuditActionBadgeClass(l.action)}" style="font-size:0.75rem;">
+            ${escapeHtml(l.action)}
+          </span>
+        </td>
+        <td style="font-family:monospace; font-size:0.85rem;">${escapeHtml(l.target_id || '-')}</td>
+        <td style="font-size:0.85rem; color:#334155;">${escapeHtml(l.details)}</td>
+        <td style="font-family:monospace; font-size:0.75rem; color:#64748b;">${escapeHtml(l.ip)}</td>
+      </tr>
+      `;
+    }).join("");
+
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2rem; color: var(--danger);">${err.message}</td></tr>`;
+  }
+}
+
+function getAuditActionBadgeClass(action) {
+  if (!action) return "badge-blue";
+  if (action.includes("LOGIN")) return "badge-committee";
+  if (action.includes("CONFIRM")) return "badge-green";
+  if (action.includes("DELETE")) return "badge-red";
+  if (action.includes("STATUS")) return "badge-amber";
+  if (action.includes("PRICING")) return "badge-amber";
+  if (action.includes("USER")) return "badge-main";
+  return "badge-blue";
+}
+
+// ----------------------------------------------------
+// Formatting & Helpers
+// ----------------------------------------------------
 
 function formatRoom(room) {
   const map = {
@@ -446,7 +886,10 @@ function escapeHtml(str) {
     .replace(/'/g, "&#039;");
 }
 
+// ----------------------------------------------------
 // Modal handling for Editing Bookings
+// ----------------------------------------------------
+
 function openEditBookingModal(bookingId) {
   const booking = loadedBookings.find(b => b.id === bookingId);
   if (!booking) return;
@@ -489,7 +932,6 @@ document.addEventListener("DOMContentLoaded", () => {
   if (closeBtn) closeBtn.addEventListener("click", closeEditBookingModal);
   if (cancelBtn) cancelBtn.addEventListener("click", closeEditBookingModal);
 
-  // Close when clicking modal backdrop
   const modal = document.getElementById("editBookingModal");
   if (modal) {
     modal.addEventListener("click", (e) => {

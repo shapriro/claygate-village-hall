@@ -21,6 +21,9 @@
         <ul>
           <li><a href="/index.html">View Website</a></li>
           <li><a href="/booking.html">Booking Form</a></li>
+          <li id="userBadgeItem" style="display:none; align-items:center; font-size:0.85rem; color:var(--text-muted);">
+            <span id="loggedInUserDisplay" style="font-weight:600; color:var(--text-dark); margin-right:0.5rem;"></span>
+          </li>
           <li><button id="logoutBtn" class="btn btn-outline btn-sm" style="display:none;">Sign Out</button></li>
         </ul>
       </nav>
@@ -31,15 +34,19 @@
     
     <!-- Login Card -->
     <div id="loginCard" class="form-container" style="max-width: 450px;">
-      <h3 style="margin-bottom: 1rem; color: var(--primary);">Administrator Access</h3>
-      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Enter your Cloudflare admin authorization token to view and manage venue bookings.</p>
+      <h3 style="margin-bottom: 0.5rem; color: var(--primary);">Administrator Sign In</h3>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Enter your admin username or email and password to access the venue management portal.</p>
       
       <div id="loginAlert" class="alert alert-error" style="display:none;"></div>
       
       <form id="adminLoginForm">
         <div class="form-group">
-          <label for="adminSecret">Admin Secret Key</label>
-          <input type="password" id="adminSecret" class="form-control" placeholder="Default: admin123" required>
+          <label for="adminUsername">Username or Email</label>
+          <input type="text" id="adminUsername" class="form-control" placeholder="admin or email address" required autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label for="adminPassword">Password</label>
+          <input type="password" id="adminPassword" class="form-control" placeholder="••••••••" required autocomplete="current-password">
         </div>
         <button type="submit" class="btn btn-primary" style="width:100%;">Sign In</button>
       </form>
@@ -50,11 +57,17 @@
 
       <!-- Admin Top Tab Navigation -->
       <div class="admin-tab-nav">
-        <button type="button" class="admin-tab-btn active" data-tab="tab-bookings">
+        <button type="button" class="admin-tab-btn active" data-tab="tab-bookings" id="navTabBookings">
           📋 Booking Requests
         </button>
-        <button type="button" class="admin-tab-btn" data-tab="tab-pricing">
+        <button type="button" class="admin-tab-btn" data-tab="tab-pricing" id="navTabPricing">
           🏷️ Price Updates & Matrix
+        </button>
+        <button type="button" class="admin-tab-btn" data-tab="tab-users" id="navTabUsers">
+          👥 Admin Users & RBAC
+        </button>
+        <button type="button" class="admin-tab-btn" data-tab="tab-audit" id="navTabAudit">
+          📜 Audit History
         </button>
       </div>
 
@@ -200,6 +213,147 @@
           </table>
         </div>
       </div>
+
+      <!-- Tab 3: Admin Users & RBAC -->
+      <div id="tab-users" class="admin-tab-pane">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 1rem;">
+          <div>
+            <h2>Admin Users & Role-Based Access Control</h2>
+            <p style="color:var(--text-muted); font-size:0.9rem;">
+              Manage administrator logins and configure granular read/write permissions for each section.
+            </p>
+          </div>
+          <button id="toggleAddUserBtn" class="btn btn-primary btn-sm">➕ Add New Admin User</button>
+        </div>
+
+        <div id="userNotice" class="alert" style="display:none;"></div>
+
+        <!-- Add / Edit Admin User Card -->
+        <div id="addUserCard" class="add-price-card" style="display:none; margin-bottom: 1.5rem; background:#fff; border:1px solid var(--border); border-radius:8px; padding:1.25rem;">
+          <h4 id="userFormTitle" style="margin-bottom:1rem; color:var(--primary);">➕ Add New Admin User</h4>
+          <form id="adminUserForm">
+            <input type="hidden" id="manageUserId" value="">
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="newAdminUsername">Username *</label>
+                <input type="text" id="newAdminUsername" class="form-control" placeholder="e.g. jsmith" required>
+              </div>
+              <div class="form-group">
+                <label for="newAdminName">Full Name *</label>
+                <input type="text" id="newAdminName" class="form-control" placeholder="e.g. Jane Smith" required>
+              </div>
+              <div class="form-group">
+                <label for="newAdminEmail">Email Address</label>
+                <input type="email" id="newAdminEmail" class="form-control" placeholder="jane@claygatevillagehall.co.uk">
+              </div>
+              <div class="form-group">
+                <label for="newAdminRole">Role Profile</label>
+                <select id="newAdminRole" class="form-control">
+                  <option value="admin">Administrator (Full Access)</option>
+                  <option value="manager">Venue Booking Manager</option>
+                  <option value="accountant">Treasurer / Pricing Reviewer</option>
+                  <option value="auditor">Auditor (Read-Only All)</option>
+                  <option value="staff">Custom Staff Access</option>
+                </select>
+              </div>
+              <div class="form-group form-full">
+                <label for="newAdminPassword">Password <span id="pwdOptionalNotice" style="font-weight:normal; color:var(--text-muted);">(Required for new users)</span></label>
+                <input type="password" id="newAdminPassword" class="form-control" placeholder="Enter secure password">
+              </div>
+
+              <!-- Permission Checkboxes -->
+              <div class="form-group form-full" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:1rem;">
+                <label style="font-weight:700; margin-bottom:0.75rem; display:block;">Granular Section Permissions:</label>
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:0.75rem;">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="permReadBookings" checked>
+                    <span>📖 View Bookings</span>
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="permWriteBookings" checked>
+                    <span>✏️ Edit & Confirm Bookings</span>
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="permReadPricing" checked>
+                    <span>📖 View Pricing Matrix</span>
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="permWritePricing">
+                    <span>✏️ Modify & Save Pricing</span>
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="permManageUsers">
+                    <span>👥 Manage Admin Users (RBAC)</span>
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="permViewAudit" checked>
+                    <span>📜 View Audit History</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.25rem;">
+              <button type="button" class="btn btn-outline btn-sm" id="cancelUserFormBtn">Cancel</button>
+              <button type="submit" class="btn btn-primary btn-sm" id="saveUserBtn">Save Admin User</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Users Table -->
+        <div class="table-wrapper">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th style="width: 15%;">Username & Name</th>
+                <th style="width: 20%;">Email</th>
+                <th style="width: 12%;">Role</th>
+                <th style="width: 40%;">Granted Section Access</th>
+                <th style="width: 13%; text-align:center;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="usersTableBody">
+              <tr>
+                <td colspan="5" style="text-align:center; padding: 2rem;">Loading admin users...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab 4: Audit History -->
+      <div id="tab-audit" class="admin-tab-pane">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 1rem;">
+          <div>
+            <h2>Audit History & Activity Log</h2>
+            <p style="color:var(--text-muted); font-size:0.9rem;">
+              Complete chronological audit trail of all changes to bookings, pricing rates, and user privileges.
+            </p>
+          </div>
+          <button id="refreshAuditBtn" class="btn btn-outline btn-sm">↻ Refresh Audit Log</button>
+        </div>
+
+        <div class="table-wrapper">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th style="width: 16%;">Timestamp</th>
+                <th style="width: 14%;">Admin User</th>
+                <th style="width: 18%;">Action</th>
+                <th style="width: 12%;">Target Ref</th>
+                <th style="width: 30%;">Details & Changes</th>
+                <th style="width: 10%;">Origin IP</th>
+              </tr>
+            </thead>
+            <tbody id="auditTableBody">
+              <tr>
+                <td colspan="6" style="text-align:center; padding: 2rem;">Loading audit trail...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </div>
 
     <!-- Edit Booking Modal -->
