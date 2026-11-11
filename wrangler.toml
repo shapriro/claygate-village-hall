@@ -5,3 +5,9 @@ compatibility_date = "2024-09-23"
 [assets]
 directory = "public"
 binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cvh_db"
+database_id = "05bff8a5-c2cd-440b-87d3-4cf4e8b768ec"
+
