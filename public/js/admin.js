@@ -1,8 +1,10 @@
-// Admin Dashboard Logic: Bookings, Pricing, Users RBAC & Audit History
+// Admin Dashboard Logic: Bookings, Pricing, Documents Hub, Users RBAC & Audit History
 let token = sessionStorage.getItem("cvh_admin_token") || "";
 let currentUser = null;
 let currentPricingList = [];
 let loadedBookings = [];
+let loadedDocuments = [];
+let loadedAdminUsers = [];
 
 try {
   const cachedUser = sessionStorage.getItem("cvh_admin_user");
@@ -41,6 +43,34 @@ document.addEventListener("DOMContentLoaded", () => {
   const cancelUserFormBtn = document.getElementById("cancelUserFormBtn");
   const refreshAuditBtn = document.getElementById("refreshAuditBtn");
 
+  // Document Hub elements
+  const toggleUploadDocBtn = document.getElementById("toggleUploadDocBtn");
+  const uploadDocCard = document.getElementById("uploadDocCard");
+  const uploadDocForm = document.getElementById("uploadDocForm");
+  const cancelUploadDocBtn = document.getElementById("cancelUploadDocBtn");
+  const refreshDocsBtn = document.getElementById("refreshDocsBtn");
+  const docCategoryFilter = document.getElementById("docCategoryFilter");
+
+  // Password reset & change password elements
+  const forgotPasswordLink = document.getElementById("forgotPasswordLink");
+  const forgotPasswordModal = document.getElementById("forgotPasswordModal");
+  const closeForgotModalBtn = document.getElementById("closeForgotModalBtn");
+  const cancelResetBtn = document.getElementById("cancelResetBtn");
+  const tokenResetForm = document.getElementById("tokenResetForm");
+  const openChangePasswordBtn = document.getElementById("openChangePasswordBtn");
+  const changePasswordModal = document.getElementById("changePasswordModal");
+  const closeChangePasswordBtn = document.getElementById("closeChangePasswordBtn");
+  const cancelChangePasswordBtn = document.getElementById("cancelChangePasswordBtn");
+  const changePasswordForm = document.getElementById("changePasswordForm");
+
+  // Check URL query parameters for ?reset_token=xyz
+  const urlParams = new URLSearchParams(window.location.search);
+  const resetTokenParam = urlParams.get("reset_token");
+  if (resetTokenParam && forgotPasswordModal) {
+    document.getElementById("resetTokenInput").value = resetTokenParam;
+    forgotPasswordModal.style.display = "flex";
+  }
+
   // Tab switching
   const tabBtns = document.querySelectorAll(".admin-tab-btn");
   tabBtns.forEach(btn => {
@@ -53,6 +83,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (target) target.classList.add("active");
 
       // Auto load tab data
+      if (targetId === "tab-documents") loadDocuments();
       if (targetId === "tab-users") loadAdminUsers();
       if (targetId === "tab-audit") loadAuditLog();
     });
@@ -198,32 +229,204 @@ document.addEventListener("DOMContentLoaded", () => {
       applyRolePreset(roleSelect.value);
     });
   }
+
+  // Documents triggers
+  if (toggleUploadDocBtn) {
+    toggleUploadDocBtn.addEventListener("click", () => {
+      const isHidden = uploadDocCard.style.display === "none";
+      uploadDocCard.style.display = isHidden ? "block" : "none";
+      toggleUploadDocBtn.textContent = isHidden ? "✕ Close Upload" : "📤 Upload Document";
+    });
+  }
+
+  if (cancelUploadDocBtn) {
+    cancelUploadDocBtn.addEventListener("click", () => {
+      uploadDocCard.style.display = "none";
+      if (toggleUploadDocBtn) toggleUploadDocBtn.textContent = "📤 Upload Document";
+    });
+  }
+
+  if (refreshDocsBtn) {
+    refreshDocsBtn.addEventListener("click", () => loadDocuments());
+  }
+
+  if (docCategoryFilter) {
+    docCategoryFilter.addEventListener("change", () => renderDocumentsTable());
+  }
+
+  if (uploadDocForm) {
+    uploadDocForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await handleUploadDocument();
+    });
+  }
+
+  // Forgot Password Modal Triggers
+  if (forgotPasswordLink) {
+    forgotPasswordLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      forgotPasswordModal.style.display = "flex";
+    });
+  }
+  if (closeForgotModalBtn) {
+    closeForgotModalBtn.addEventListener("click", () => { forgotPasswordModal.style.display = "none"; });
+  }
+  if (cancelResetBtn) {
+    cancelResetBtn.addEventListener("click", () => { forgotPasswordModal.style.display = "none"; });
+  }
+
+  if (tokenResetForm) {
+    tokenResetForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const tokenVal = document.getElementById("resetTokenInput").value.trim();
+      const pw1 = document.getElementById("resetNewPassword").value;
+      const pw2 = document.getElementById("resetConfirmPassword").value;
+      const alertBox = document.getElementById("resetAlert");
+      alertBox.style.display = "none";
+
+      if (pw1 !== pw2) {
+        alertBox.textContent = "Passwords do not match.";
+        alertBox.style.display = "block";
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/auth/reset-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: tokenVal, newPassword: pw1 })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Reset failed");
+
+        alert("Success: " + data.message);
+        forgotPasswordModal.style.display = "none";
+        tokenResetForm.reset();
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } catch (err) {
+        alertBox.textContent = err.message;
+        alertBox.style.display = "block";
+      }
+    });
+  }
+
+  // Change Password Modal Triggers
+  if (openChangePasswordBtn) {
+    openChangePasswordBtn.addEventListener("click", () => {
+      openChangePasswordModal(false);
+    });
+  }
+  if (closeChangePasswordBtn) {
+    closeChangePasswordBtn.addEventListener("click", () => { changePasswordModal.style.display = "none"; });
+  }
+  if (cancelChangePasswordBtn) {
+    cancelChangePasswordBtn.addEventListener("click", () => { changePasswordModal.style.display = "none"; });
+  }
+
+  if (changePasswordForm) {
+    changePasswordForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const oldPw = document.getElementById("currentPassword").value;
+      const pw1 = document.getElementById("newPasswordInput").value;
+      const pw2 = document.getElementById("confirmNewPasswordInput").value;
+      const alertBox = document.getElementById("changePasswordAlert");
+      alertBox.style.display = "none";
+
+      if (pw1 !== pw2) {
+        alertBox.textContent = "New passwords do not match.";
+        alertBox.style.display = "block";
+        return;
+      }
+
+      const saveBtn = document.getElementById("saveNewPasswordBtn");
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Updating...";
+
+      try {
+        const res = await fetch("/api/auth/change-password", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({ oldPassword: oldPw, newPassword: pw1 })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to update password");
+
+        alert("Your password has been updated successfully!");
+        changePasswordModal.style.display = "none";
+        changePasswordForm.reset();
+
+        if (currentUser) {
+          currentUser.must_change_password = false;
+          sessionStorage.setItem("cvh_admin_user", JSON.stringify(currentUser));
+        }
+      } catch (err) {
+        alertBox.textContent = err.message;
+        alertBox.style.display = "block";
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Update Password";
+      }
+    });
+  }
 });
+
+function openChangePasswordModal(isForcedFirstLogin = false) {
+  const modal = document.getElementById("changePasswordModal");
+  const firstNotice = document.getElementById("firstLoginNotice");
+  const oldGroup = document.getElementById("oldPasswordGroup");
+  const oldInput = document.getElementById("currentPassword");
+
+  if (isForcedFirstLogin) {
+    firstNotice.style.display = "block";
+    oldGroup.style.display = "none";
+    oldInput.required = false;
+  } else {
+    firstNotice.style.display = "none";
+    oldGroup.style.display = "block";
+    oldInput.required = true;
+  }
+
+  modal.style.display = "flex";
+}
 
 function applyRolePreset(role) {
   const rBook = document.getElementById("permReadBookings");
   const wBook = document.getElementById("permWriteBookings");
   const rPrice = document.getElementById("permReadPricing");
   const wPrice = document.getElementById("permWritePricing");
+  const rDoc = document.getElementById("permReadDocuments");
+  const wDoc = document.getElementById("permUploadDocuments");
   const mUser = document.getElementById("permManageUsers");
   const vAudit = document.getElementById("permViewAudit");
 
   if (role === "admin") {
     rBook.checked = true; wBook.checked = true;
     rPrice.checked = true; wPrice.checked = true;
+    rDoc.checked = true; wDoc.checked = true;
     mUser.checked = true; vAudit.checked = true;
   } else if (role === "manager") {
     rBook.checked = true; wBook.checked = true;
     rPrice.checked = true; wPrice.checked = false;
+    rDoc.checked = true; wDoc.checked = true;
     mUser.checked = false; vAudit.checked = true;
   } else if (role === "accountant") {
     rBook.checked = true; wBook.checked = false;
     rPrice.checked = true; wPrice.checked = true;
+    rDoc.checked = true; wDoc.checked = true;
     mUser.checked = false; vAudit.checked = true;
   } else if (role === "auditor") {
     rBook.checked = true; wBook.checked = false;
     rPrice.checked = true; wPrice.checked = false;
+    rDoc.checked = true; wDoc.checked = false;
     mUser.checked = false; vAudit.checked = true;
+  } else if (role === "staff") {
+    rBook.checked = true; wBook.checked = true;
+    rPrice.checked = true; wPrice.checked = false;
+    rDoc.checked = true; wDoc.checked = false;
+    mUser.checked = false; vAudit.checked = false;
   }
 }
 
@@ -255,6 +458,11 @@ async function showDashboard() {
 
     // Apply RBAC UI gating
     applyRBACUI(currentUser);
+
+    // If first login password change is required, pop modal immediately
+    if (currentUser.must_change_password) {
+      openChangePasswordModal(true);
+    }
   }
 
   // Load initial tab data
@@ -271,41 +479,31 @@ function applyRBACUI(user) {
 
   // Bookings Tab
   const navBookings = document.getElementById("navTabBookings");
-  if (!user.can_read_bookings) {
-    if (navBookings) navBookings.style.display = "none";
-  } else {
-    if (navBookings) navBookings.style.display = "inline-block";
-  }
+  if (navBookings) navBookings.style.display = user.can_read_bookings ? "inline-block" : "none";
 
   // Pricing Tab
   const navPricing = document.getElementById("navTabPricing");
-  if (!user.can_read_pricing) {
-    if (navPricing) navPricing.style.display = "none";
-  } else {
-    if (navPricing) navPricing.style.display = "inline-block";
-  }
+  if (navPricing) navPricing.style.display = user.can_read_pricing ? "inline-block" : "none";
 
-  // Pricing Write Permissions
   const savePricesBtn = document.getElementById("savePricesBtn");
   const toggleAddPriceBtn = document.getElementById("toggleAddPriceBtn");
   if (savePricesBtn) savePricesBtn.style.display = user.can_write_pricing ? "inline-block" : "none";
   if (toggleAddPriceBtn) toggleAddPriceBtn.style.display = user.can_write_pricing ? "inline-block" : "none";
 
+  // Documents Tab
+  const navDocuments = document.getElementById("navTabDocuments");
+  if (navDocuments) navDocuments.style.display = user.can_read_documents ? "inline-block" : "none";
+
+  const toggleUploadDocBtn = document.getElementById("toggleUploadDocBtn");
+  if (toggleUploadDocBtn) toggleUploadDocBtn.style.display = (user.can_upload_documents || user.can_manage_users) ? "inline-block" : "none";
+
   // Users Tab
   const navUsers = document.getElementById("navTabUsers");
-  if (!user.can_manage_users) {
-    if (navUsers) navUsers.style.display = "none";
-  } else {
-    if (navUsers) navUsers.style.display = "inline-block";
-  }
+  if (navUsers) navUsers.style.display = user.can_manage_users ? "inline-block" : "none";
 
   // Audit Tab
   const navAudit = document.getElementById("navTabAudit");
-  if (!user.can_view_audit) {
-    if (navAudit) navAudit.style.display = "none";
-  } else {
-    if (navAudit) navAudit.style.display = "inline-block";
-  }
+  if (navAudit) navAudit.style.display = user.can_view_audit ? "inline-block" : "none";
 }
 
 // ----------------------------------------------------
@@ -473,7 +671,7 @@ function renderPricingTable(list) {
   const tbody = document.getElementById("pricingTableBody");
   const canWrite = !currentUser || currentUser.can_write_pricing;
 
-  tbody.innerHTML = list.map((item, index) => {
+  tbody.innerHTML = list.map((item) => {
     const isPerEvent = item.unit === "per_event";
     const isFlat = item.unit === "flat";
     const unitLabel = isPerEvent ? "Per Event" : isFlat ? "Flat Deposit" : "Per Hour";
@@ -527,9 +725,7 @@ function renderPricingTable(list) {
 
 window.updatePricingField = function(key, field, val) {
   const item = currentPricingList.find(p => p.key === key);
-  if (item) {
-    item[field] = val;
-  }
+  if (item) item[field] = val;
 };
 
 window.removePricingRule = function(key) {
@@ -571,10 +767,172 @@ async function savePricing() {
 }
 
 // ----------------------------------------------------
-// Tab 3: Admin Users & RBAC Management
+// Tab: Document Hub (Internal Committee Repository)
 // ----------------------------------------------------
 
-let loadedAdminUsers = [];
+async function loadDocuments() {
+  const tbody = document.getElementById("documentsTableBody");
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2rem;">Loading documents...</td></tr>`;
+
+  try {
+    const res = await fetch("/api/documents", {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load documents");
+
+    loadedDocuments = data.documents || [];
+    renderDocumentsTable();
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2rem; color: var(--danger);">${err.message}</td></tr>`;
+  }
+}
+
+function renderDocumentsTable() {
+  const tbody = document.getElementById("documentsTableBody");
+  const filterCat = document.getElementById("docCategoryFilter")?.value || "";
+
+  let docs = [...loadedDocuments];
+  if (filterCat) {
+    docs = docs.filter(d => d.category === filterCat);
+  }
+
+  if (docs.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2.5rem; color: var(--text-muted);">No documents found in this category. Upload committee files using the button above.</td></tr>`;
+    return;
+  }
+
+  const canUpload = currentUser?.can_upload_documents || currentUser?.can_manage_users;
+
+  tbody.innerHTML = docs.map(d => {
+    const sizeKB = (d.file_size / 1024).toFixed(1);
+    const dateStr = d.created_at ? new Date(d.created_at).toLocaleDateString("en-GB") : "-";
+
+    return `
+    <tr>
+      <td>
+        <strong style="color:var(--primary); font-size:0.95rem;">${escapeHtml(d.title)}</strong>
+        <div style="font-size:0.75rem; color:var(--text-muted);">${dateStr}</div>
+      </td>
+      <td>
+        <span class="badge ${getDocumentCategoryBadgeClass(d.category)}">${escapeHtml(d.category)}</span>
+      </td>
+      <td style="font-family:monospace; font-size:0.85rem; color:#475569;">
+        ${escapeHtml(d.filename)}
+      </td>
+      <td style="font-size:0.85rem; color:#64748b;">${sizeKB} KB</td>
+      <td><span style="font-size:0.85rem; color:#1e293b; font-weight:600;">${escapeHtml(d.uploaded_by)}</span></td>
+      <td style="text-align:center;">
+        <div style="display:flex; gap:0.4rem; justify-content:center;">
+          <a class="btn btn-sm btn-primary" style="padding:0.25rem 0.6rem; font-size:0.75rem; text-decoration:none;" 
+             href="/api/documents?id=${d.id}&download=1" target="_blank" download>⬇️ Download</a>
+          ${canUpload ? `
+            <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem; color:#b91c1c; border-color:#fecaca;" 
+              onclick="deleteDocument(${d.id}, '${escapeHtml(d.filename)}')">🗑️</button>
+          ` : ''}
+        </div>
+      </td>
+    </tr>
+    `;
+  }).join("");
+}
+
+function getDocumentCategoryBadgeClass(category) {
+  const map = {
+    Minutes: "badge-blue",
+    Finance: "badge-green",
+    Policies: "badge-amber",
+    Agreements: "badge-committee",
+    Licensing: "badge-main",
+    Maintenance: "badge-small"
+  };
+  return map[category] || "badge-blue";
+}
+
+async function handleUploadDocument() {
+  const title = document.getElementById("docTitle").value.trim();
+  const category = document.getElementById("docCategory").value;
+  const fileInput = document.getElementById("docFileInput");
+  const file = fileInput.files[0];
+  if (!file) return alert("Please select a file to upload.");
+
+  if (file.size > 10 * 1024 * 1024) {
+    return alert("File is too large. Maximum supported size is 10MB.");
+  }
+
+  const submitBtn = document.getElementById("submitUploadDocBtn");
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Uploading...";
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const base64Data = reader.result.split(",")[1];
+      const payload = {
+        title,
+        category,
+        filename: file.name,
+        mime_type: file.type || "application/octet-stream",
+        file_size: file.size,
+        file_data: base64Data
+      };
+
+      const res = await fetch("/api/documents", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+
+      const notice = document.getElementById("docNotice");
+      notice.className = "alert alert-success";
+      notice.textContent = data.message || `File "${file.name}" uploaded successfully!`;
+      notice.style.display = "block";
+      setTimeout(() => { notice.style.display = "none"; }, 4000);
+
+      document.getElementById("uploadDocForm").reset();
+      document.getElementById("uploadDocCard").style.display = "none";
+      document.getElementById("toggleUploadDocBtn").textContent = "📤 Upload Document";
+
+      await loadDocuments();
+    } catch (err) {
+      alert("Upload error: " + err.message);
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Upload Document";
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+window.deleteDocument = async function(docId, filename) {
+  if (!confirm(`Are you sure you want to delete "${filename}"?`)) return;
+
+  try {
+    const res = await fetch("/api/documents", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ id: docId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Delete failed");
+
+    await loadDocuments();
+  } catch (err) {
+    alert("Delete error: " + err.message);
+  }
+};
+
+// ----------------------------------------------------
+// Tab 3: Admin Users & RBAC Management
+// ----------------------------------------------------
 
 async function loadAdminUsers() {
   const tbody = document.getElementById("usersTableBody");
@@ -601,8 +959,14 @@ async function loadAdminUsers() {
       if (u.can_write_bookings) perms.push('<span class="badge badge-green">Edit Bookings</span>');
       if (u.can_read_pricing) perms.push('<span class="badge badge-blue">Read Pricing</span>');
       if (u.can_write_pricing) perms.push('<span class="badge badge-amber">Edit Pricing</span>');
+      if (u.can_read_documents) perms.push('<span class="badge badge-blue">Read Docs</span>');
+      if (u.can_upload_documents) perms.push('<span class="badge badge-green">Upload Docs</span>');
       if (u.can_manage_users) perms.push('<span class="badge badge-committee">Manage Users</span>');
       if (u.can_view_audit) perms.push('<span class="badge badge-small">View Audit</span>');
+
+      if (u.must_change_password) {
+        perms.push('<span class="badge badge-amber" style="background:#fef3c7; color:#92400e; border:1px solid #fde68a;">Pending 1st Login Pwd</span>');
+      }
 
       const isPrimary = u.username === "admin";
 
@@ -626,8 +990,9 @@ async function loadAdminUsers() {
           </div>
         </td>
         <td style="text-align:center;">
-          <div style="display:flex; gap:0.35rem; justify-content:center;">
+          <div style="display:flex; gap:0.35rem; justify-content:center; flex-wrap:wrap;">
             <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem;" onclick="openEditUserForm(${u.id})">✏️ Edit</button>
+            <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem; color:#0369a1; border-color:#bae6fd;" onclick="generateUserResetLink(${u.id}, '${escapeHtml(u.username)}')" title="Generate one-time reset link">🔗 Reset</button>
             ${!isPrimary ? `
               <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.5rem; font-size:0.75rem; color:#b91c1c; border-color:#fecaca;" onclick="deleteAdminUser(${u.id}, '${escapeHtml(u.username)}')">🗑️</button>
             ` : ''}
@@ -658,8 +1023,11 @@ function resetUserForm() {
   document.getElementById("permWriteBookings").checked = true;
   document.getElementById("permReadPricing").checked = true;
   document.getElementById("permWritePricing").checked = false;
+  document.getElementById("permReadDocuments").checked = true;
+  document.getElementById("permUploadDocuments").checked = false;
   document.getElementById("permManageUsers").checked = false;
   document.getElementById("permViewAudit").checked = true;
+  document.getElementById("permMustChangePassword").checked = true;
 }
 
 window.openEditUserForm = function(userId) {
@@ -686,8 +1054,11 @@ window.openEditUserForm = function(userId) {
   document.getElementById("permWriteBookings").checked = !!user.can_write_bookings;
   document.getElementById("permReadPricing").checked = !!user.can_read_pricing;
   document.getElementById("permWritePricing").checked = !!user.can_write_pricing;
+  document.getElementById("permReadDocuments").checked = !!user.can_read_documents;
+  document.getElementById("permUploadDocuments").checked = !!user.can_upload_documents;
   document.getElementById("permManageUsers").checked = !!user.can_manage_users;
   document.getElementById("permViewAudit").checked = !!user.can_view_audit;
+  document.getElementById("permMustChangePassword").checked = !!user.must_change_password;
 
   card.scrollIntoView({ behavior: "smooth" });
 };
@@ -710,8 +1081,11 @@ async function handleSaveAdminUser() {
     can_write_bookings: document.getElementById("permWriteBookings").checked,
     can_read_pricing: document.getElementById("permReadPricing").checked,
     can_write_pricing: document.getElementById("permWritePricing").checked,
+    can_read_documents: document.getElementById("permReadDocuments").checked,
+    can_upload_documents: document.getElementById("permUploadDocuments").checked,
     can_manage_users: document.getElementById("permManageUsers").checked,
-    can_view_audit: document.getElementById("permViewAudit").checked
+    can_view_audit: document.getElementById("permViewAudit").checked,
+    must_change_password: document.getElementById("permMustChangePassword").checked
   };
 
   const isEdit = Boolean(id);
@@ -750,6 +1124,27 @@ async function handleSaveAdminUser() {
     saveBtn.textContent = "Save Admin User";
   }
 }
+
+window.generateUserResetLink = async function(userId, username) {
+  try {
+    const res = await fetch("/api/admin-users", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ id: userId, action: "generate_reset" })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to generate reset link");
+
+    const fullUrl = `${window.location.origin}/admin?reset_token=${data.reset_token}`;
+    prompt(`Single-use 24-hour Password Reset Link for ${username}:\n(Copy and send to user)`, fullUrl);
+    await loadAdminUsers();
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+};
 
 window.deleteAdminUser = async function(userId, username) {
   if (!confirm(`Are you sure you want to delete admin account "${username}"?`)) return;
@@ -830,6 +1225,8 @@ function getAuditActionBadgeClass(action) {
   if (action.includes("STATUS")) return "badge-amber";
   if (action.includes("PRICING")) return "badge-amber";
   if (action.includes("USER")) return "badge-main";
+  if (action.includes("PASSWORD")) return "badge-amber";
+  if (action.includes("DOCUMENT")) return "badge-green";
   return "badge-blue";
 }
 

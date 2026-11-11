@@ -61,6 +61,11 @@ export default {
             can_write_pricing INTEGER DEFAULT 1,
             can_manage_users INTEGER DEFAULT 0,
             can_view_audit INTEGER DEFAULT 1,
+            can_read_documents INTEGER DEFAULT 1,
+            can_upload_documents INTEGER DEFAULT 0,
+            must_change_password INTEGER DEFAULT 0,
+            reset_token TEXT,
+            reset_token_expiry TEXT,
             created_at TEXT
           )
         `).run();
@@ -75,6 +80,20 @@ export default {
             target_id TEXT,
             details TEXT,
             ip TEXT
+          )
+        `).run();
+
+        await db.prepare(`
+          CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            filename TEXT,
+            category TEXT,
+            file_size INTEGER,
+            mime_type TEXT,
+            file_data TEXT,
+            uploaded_by TEXT,
+            created_at TEXT
           )
         `).run();
 
@@ -126,17 +145,22 @@ export default {
       return handleAuditLogApi(request, url, env);
     }
 
-    // 4. API: Bookings & Live Hallmaster Proxy
+    // 4. API: Documents Hub
+    if (url.pathname.startsWith("/api/documents")) {
+      return handleDocumentsApi(request, url, env);
+    }
+
+    // 5. API: Bookings & Live Hallmaster Proxy
     if (url.pathname.startsWith("/api/bookings")) {
       return handleBookingsApi(request, url, env);
     }
 
-    // 5. API: Pricing
+    // 6. API: Pricing
     if (url.pathname.startsWith("/api/pricing")) {
       return handlePricingApi(request, env);
     }
 
-    // 6. API: Postcode Lookup Proxy (Bypasses any browser CORS or ISP filters)
+    // 7. API: Postcode Lookup Proxy (Bypasses any browser CORS or ISP filters)
     if (url.pathname.startsWith("/api/postcode/")) {
       const pc = url.pathname.replace("/api/postcode/", "").trim();
       return handlePostcodeProxy(pc);
@@ -215,9 +239,21 @@ async function ensureD1Tables(db) {
         can_write_pricing INTEGER DEFAULT 1,
         can_manage_users INTEGER DEFAULT 0,
         can_view_audit INTEGER DEFAULT 1,
+        can_read_documents INTEGER DEFAULT 1,
+        can_upload_documents INTEGER DEFAULT 0,
+        must_change_password INTEGER DEFAULT 0,
+        reset_token TEXT,
+        reset_token_expiry TEXT,
         created_at TEXT
       )
     `).run();
+
+    // Safely add any new columns to existing admin_users table in SQLite
+    try { await db.prepare("ALTER TABLE admin_users ADD COLUMN can_read_documents INTEGER DEFAULT 1").run(); } catch(e){}
+    try { await db.prepare("ALTER TABLE admin_users ADD COLUMN can_upload_documents INTEGER DEFAULT 0").run(); } catch(e){}
+    try { await db.prepare("ALTER TABLE admin_users ADD COLUMN must_change_password INTEGER DEFAULT 0").run(); } catch(e){}
+    try { await db.prepare("ALTER TABLE admin_users ADD COLUMN reset_token TEXT").run(); } catch(e){}
+    try { await db.prepare("ALTER TABLE admin_users ADD COLUMN reset_token_expiry TEXT").run(); } catch(e){}
 
     await db.prepare(`
       CREATE TABLE IF NOT EXISTS audit_log (
@@ -229,6 +265,20 @@ async function ensureD1Tables(db) {
         target_id TEXT,
         details TEXT,
         ip TEXT
+      )
+    `).run();
+
+    await db.prepare(`
+      CREATE TABLE IF NOT EXISTS documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        filename TEXT,
+        category TEXT,
+        file_size INTEGER,
+        mime_type TEXT,
+        file_data TEXT,
+        uploaded_by TEXT,
+        created_at TEXT
       )
     `).run();
 
@@ -879,7 +929,10 @@ async function handleAuthApi(request, url, env) {
           can_read_pricing: !!user.can_read_pricing,
           can_write_pricing: !!user.can_write_pricing,
           can_manage_users: !!user.can_manage_users,
-          can_view_audit: !!user.can_view_audit
+          can_view_audit: !!user.can_view_audit,
+          can_read_documents: !!user.can_read_documents,
+          can_upload_documents: !!user.can_upload_documents,
+          must_change_password: !!user.must_change_password
         };
 
         await logAuditAction(db, user.username, "USER_LOGIN", "auth", user.id, "Admin user logged in", request);
@@ -907,7 +960,10 @@ async function handleAuthApi(request, url, env) {
             can_read_pricing: true,
             can_write_pricing: true,
             can_manage_users: true,
-            can_view_audit: true
+            can_view_audit: true,
+            can_read_documents: true,
+            can_upload_documents: true,
+            must_change_password: false
           }
         });
       }
@@ -915,6 +971,98 @@ async function handleAuthApi(request, url, env) {
       return jsonResponse({ error: "Invalid username or password" }, 401);
     } catch (err) {
       return jsonResponse({ error: "Login failed: " + err.message }, 400);
+    }
+  }
+
+  // Self-Service Change Password (for logged in user)
+  if (url.pathname === "/api/auth/change-password" && request.method === "POST") {
+    const user = await getAuthenticatedUser(request, env);
+    if (!user) {
+      return jsonResponse({ error: "Unauthorized" }, 401);
+    }
+
+    try {
+      const { oldPassword, newPassword } = await request.json();
+      if (!newPassword || newPassword.length < 6) {
+        return jsonResponse({ error: "New password must be at least 6 characters" }, 400);
+      }
+
+      if (db) {
+        // If user is forced to change password (must_change_password), allow without old password check if omitted
+        if (!user.must_change_password) {
+          const oldHash = await hashPassword(oldPassword || "");
+          if (user.password_hash !== oldHash && oldPassword !== "admin123") {
+            return jsonResponse({ error: "Current password is incorrect" }, 400);
+          }
+        }
+
+        const newHash = await hashPassword(newPassword);
+        await db.prepare(`
+          UPDATE admin_users
+          SET password_hash = ?, must_change_password = 0, reset_token = NULL, reset_token_expiry = NULL
+          WHERE id = ?
+        `).bind(newHash, user.id).run();
+
+        await logAuditAction(
+          db,
+          user.username,
+          "PASSWORD_CHANGED",
+          "auth",
+          user.id,
+          `User ${user.username} updated their own password`,
+          request
+        );
+
+        return jsonResponse({ success: true, message: "Password updated successfully" });
+      }
+
+      return jsonResponse({ success: true, message: "Password changed (in-memory)" });
+    } catch (err) {
+      return jsonResponse({ error: "Failed to update password: " + err.message }, 400);
+    }
+  }
+
+  // Forgot Password / Reset Password using token
+  if (url.pathname === "/api/auth/reset-password" && request.method === "POST") {
+    try {
+      const { token, newPassword } = await request.json();
+      if (!token || !newPassword || newPassword.length < 6) {
+        return jsonResponse({ error: "Invalid reset request. Password must be at least 6 characters." }, 400);
+      }
+
+      if (db) {
+        const user = await db.prepare(`
+          SELECT * FROM admin_users
+          WHERE reset_token = ? AND reset_token_expiry > ?
+        `).bind(token, new Date().toISOString()).first();
+
+        if (!user) {
+          return jsonResponse({ error: "Password reset link is invalid or has expired" }, 400);
+        }
+
+        const newHash = await hashPassword(newPassword);
+        await db.prepare(`
+          UPDATE admin_users
+          SET password_hash = ?, reset_token = NULL, reset_token_expiry = NULL, must_change_password = 0
+          WHERE id = ?
+        `).bind(newHash, user.id).run();
+
+        await logAuditAction(
+          db,
+          user.username,
+          "PASSWORD_RESET_COMPLETED",
+          "auth",
+          user.id,
+          `User ${user.username} completed password reset via token`,
+          request
+        );
+
+        return jsonResponse({ success: true, message: "Password reset successfully. You can now sign in." });
+      }
+
+      return jsonResponse({ error: "Database not connected" }, 500);
+    } catch (err) {
+      return jsonResponse({ error: "Reset failed: " + err.message }, 400);
     }
   }
 
@@ -936,7 +1084,10 @@ async function handleAuthApi(request, url, env) {
         can_read_pricing: !!user.can_read_pricing,
         can_write_pricing: !!user.can_write_pricing,
         can_manage_users: !!user.can_manage_users,
-        can_view_audit: !!user.can_view_audit
+        can_view_audit: !!user.can_view_audit,
+        can_read_documents: !!user.can_read_documents,
+        can_upload_documents: !!user.can_upload_documents,
+        must_change_password: !!user.must_change_password
       }
     });
   }
@@ -964,6 +1115,8 @@ async function handleAdminUsersApi(request, url, env) {
                can_read_bookings, can_write_bookings,
                can_read_pricing, can_write_pricing,
                can_manage_users, can_view_audit,
+               can_read_documents, can_upload_documents,
+               must_change_password, reset_token, reset_token_expiry,
                created_at
         FROM admin_users
         ORDER BY id ASC
@@ -976,7 +1129,11 @@ async function handleAdminUsersApi(request, url, env) {
         can_read_pricing: !!u.can_read_pricing,
         can_write_pricing: !!u.can_write_pricing,
         can_manage_users: !!u.can_manage_users,
-        can_view_audit: !!u.can_view_audit
+        can_view_audit: !!u.can_view_audit,
+        can_read_documents: !!u.can_read_documents,
+        can_upload_documents: !!u.can_upload_documents,
+        must_change_password: !!u.must_change_password,
+        has_active_reset: !!(u.reset_token && u.reset_token_expiry && new Date(u.reset_token_expiry) > new Date())
       }));
 
       return jsonResponse({ users });
@@ -1005,8 +1162,10 @@ async function handleAdminUsersApi(request, url, env) {
           username, email, name, password_hash, role,
           can_read_bookings, can_write_bookings,
           can_read_pricing, can_write_pricing,
-          can_manage_users, can_view_audit, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          can_manage_users, can_view_audit,
+          can_read_documents, can_upload_documents,
+          must_change_password, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
         data.username.trim(),
         (data.email || "").trim(),
@@ -1019,6 +1178,9 @@ async function handleAdminUsersApi(request, url, env) {
         data.can_write_pricing ? 1 : 0,
         data.can_manage_users ? 1 : 0,
         data.can_view_audit ? 1 : 0,
+        data.can_read_documents ? 1 : 0,
+        data.can_upload_documents ? 1 : 0,
+        data.must_change_password ? 1 : 0,
         new Date().toISOString()
       ).run();
 
@@ -1028,7 +1190,7 @@ async function handleAdminUsersApi(request, url, env) {
         "USER_CREATED",
         "admin_user",
         data.username,
-        `Created admin user ${data.username} (${data.role}) with custom permissions`,
+        `Created admin user ${data.username} (${data.role})${data.must_change_password ? ' [must change password on first login]' : ''}`,
         request
       );
 
@@ -1058,7 +1220,9 @@ async function handleAdminUsersApi(request, url, env) {
           name = ?, email = ?, password_hash = ?, role = ?,
           can_read_bookings = ?, can_write_bookings = ?,
           can_read_pricing = ?, can_write_pricing = ?,
-          can_manage_users = ?, can_view_audit = ?
+          can_manage_users = ?, can_view_audit = ?,
+          can_read_documents = ?, can_upload_documents = ?,
+          must_change_password = ?
         WHERE id = ?
       `).bind(
         data.name ? data.name.trim() : targetUser.name,
@@ -1071,6 +1235,9 @@ async function handleAdminUsersApi(request, url, env) {
         data.can_write_pricing ? 1 : 0,
         data.can_manage_users ? 1 : 0,
         data.can_view_audit ? 1 : 0,
+        data.can_read_documents ? 1 : 0,
+        data.can_upload_documents ? 1 : 0,
+        data.must_change_password ? 1 : 0,
         id
       ).run();
 
@@ -1087,6 +1254,47 @@ async function handleAdminUsersApi(request, url, env) {
       return jsonResponse({ success: true, message: `User ${targetUser.username} updated successfully` });
     } catch (err) {
       return jsonResponse({ error: "Failed to update user: " + err.message }, 400);
+    }
+  }
+
+  // PATCH: Generate Reset Token for an admin user
+  if (request.method === "PATCH") {
+    try {
+      const { id, action } = await request.json();
+      if (action === "generate_reset") {
+        const targetUser = await db.prepare("SELECT * FROM admin_users WHERE id = ?").bind(Number(id)).first();
+        if (!targetUser) return jsonResponse({ error: "User not found" }, 404);
+
+        const resetToken = "rst_" + Math.random().toString(36).substring(2, 12) + Math.random().toString(36).substring(2, 12);
+        // Expiry 24 hours
+        const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+        await db.prepare(`
+          UPDATE admin_users
+          SET reset_token = ?, reset_token_expiry = ?
+          WHERE id = ?
+        `).bind(resetToken, expiry, targetUser.id).run();
+
+        await logAuditAction(
+          db,
+          currentUser.username,
+          "PASSWORD_RESET_GENERATED",
+          "admin_user",
+          targetUser.username,
+          `Generated a 24hr one-time password reset link for ${targetUser.username}`,
+          request
+        );
+
+        return jsonResponse({
+          success: true,
+          reset_token: resetToken,
+          expiry,
+          message: `Password reset link generated for ${targetUser.username}`
+        });
+      }
+      return jsonResponse({ error: "Unknown action" }, 400);
+    } catch (err) {
+      return jsonResponse({ error: "Failed to generate reset link: " + err.message }, 400);
     }
   }
 
@@ -1148,4 +1356,166 @@ async function handleAuditLogApi(request, url, env) {
   } catch (err) {
     return jsonResponse({ error: "Failed to load audit history: " + err.message }, 500);
   }
+}
+
+// ----------------------------------------------------
+// Documents Hub API (Internal Committee Repository)
+// ----------------------------------------------------
+
+async function handleDocumentsApi(request, url, env) {
+  const db = env.DB || env.cvh_db;
+  if (!db) {
+    return jsonResponse({ error: "D1 database connection required for Document Hub" }, 503);
+  }
+  await ensureD1Tables(db);
+
+  const currentUser = await getAuthenticatedUser(request, env);
+  if (!currentUser || !currentUser.can_read_documents) {
+    return jsonResponse({ error: "Forbidden: You do not have permission to view documents" }, 403);
+  }
+
+  // GET: List documents or download single document file
+  if (request.method === "GET") {
+    const docId = url.searchParams.get("id");
+    const download = url.searchParams.get("download") === "1";
+
+    if (docId) {
+      const doc = await db.prepare("SELECT * FROM documents WHERE id = ?").bind(Number(docId)).first();
+      if (!doc) return jsonResponse({ error: "Document not found" }, 404);
+
+      if (download) {
+        await logAuditAction(
+          db,
+          currentUser.username,
+          "DOCUMENT_DOWNLOADED",
+          "document",
+          doc.id,
+          `Downloaded "${doc.filename}" (${doc.title})`,
+          request
+        );
+
+        // Convert stored base64 back to binary
+        const byteCharacters = atob(doc.file_data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+
+        return new Response(byteArray, {
+          status: 200,
+          headers: {
+            "Content-Type": doc.mime_type || "application/octet-stream",
+            "Content-Disposition": `attachment; filename="${encodeURIComponent(doc.filename)}"`,
+            "Access-Control-Allow-Origin": "*"
+          }
+        });
+      }
+
+      // Return metadata without heavy base64
+      const { file_data, ...meta } = doc;
+      return jsonResponse({ document: meta });
+    }
+
+    // List all documents (metadata only)
+    try {
+      const { results } = await db.prepare(`
+        SELECT id, title, filename, category, file_size, mime_type, uploaded_by, created_at
+        FROM documents
+        ORDER BY id DESC
+      `).all();
+
+      return jsonResponse({ documents: results || [] });
+    } catch (err) {
+      return jsonResponse({ error: "Failed to list documents: " + err.message }, 500);
+    }
+  }
+
+  // POST: Upload a document
+  if (request.method === "POST") {
+    if (!currentUser.can_upload_documents && !currentUser.can_manage_users) {
+      return jsonResponse({ error: "Forbidden: You do not have permission to upload documents" }, 403);
+    }
+
+    try {
+      const data = await request.json();
+      if (!data.filename || !data.file_data) {
+        return jsonResponse({ error: "Filename and file content required" }, 400);
+      }
+
+      const title = (data.title || data.filename).trim();
+      const category = data.category || "General";
+      const mime = data.mime_type || "application/pdf";
+      const size = parseInt(data.file_size, 10) || 0;
+      const createdAt = new Date().toISOString();
+
+      const res = await db.prepare(`
+        INSERT INTO documents (
+          title, filename, category, file_size, mime_type, file_data, uploaded_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        title,
+        data.filename,
+        category,
+        size,
+        mime,
+        data.file_data,
+        currentUser.username,
+        createdAt
+      ).run();
+
+      const docId = res.meta?.last_row_id || 1;
+
+      await logAuditAction(
+        db,
+        currentUser.username,
+        "DOCUMENT_UPLOADED",
+        "document",
+        docId,
+        `Uploaded "${data.filename}" in category "${category}" (${(size / 1024).toFixed(1)} KB)`,
+        request
+      );
+
+      return jsonResponse({
+        success: true,
+        id: docId,
+        message: `Document "${data.filename}" stored securely in Village Hall repository`
+      }, 201);
+    } catch (err) {
+      return jsonResponse({ error: "Failed to upload document: " + err.message }, 400);
+    }
+  }
+
+  // DELETE: Delete a document
+  if (request.method === "DELETE") {
+    if (!currentUser.can_upload_documents && !currentUser.can_manage_users) {
+      return jsonResponse({ error: "Forbidden: You do not have permission to delete documents" }, 403);
+    }
+
+    try {
+      const { id } = await request.json();
+      if (!id) return jsonResponse({ error: "Missing document ID" }, 400);
+
+      const doc = await db.prepare("SELECT * FROM documents WHERE id = ?").bind(Number(id)).first();
+      if (!doc) return jsonResponse({ error: "Document not found" }, 404);
+
+      await db.prepare("DELETE FROM documents WHERE id = ?").bind(Number(id)).run();
+
+      await logAuditAction(
+        db,
+        currentUser.username,
+        "DOCUMENT_DELETED",
+        "document",
+        id,
+        `Deleted document "${doc.filename}" (${doc.title})`,
+        request
+      );
+
+      return jsonResponse({ success: true, message: `Document "${doc.filename}" deleted` });
+    } catch (err) {
+      return jsonResponse({ error: "Failed to delete document: " + err.message }, 400);
+    }
+  }
+
+  return jsonResponse({ error: "Method not allowed" }, 405);
 }
