@@ -195,6 +195,17 @@ async function handleBookingsApi(request, url, env) {
   if (request.method === "GET") {
     const statusFilter = url.searchParams.get("status");
 
+    if (url.searchParams.get("debug") === "1") {
+      const keys = Object.keys(env || {});
+      const hasDB = !!(env.DB || env.cvh_db);
+      return jsonResponse({
+        bindingKeys: keys,
+        hasDB,
+        dbType: typeof (env.DB || env.cvh_db),
+        d1Initialized
+      });
+    }
+
     if (db) {
       try {
         let query = `SELECT * FROM bookings`;
